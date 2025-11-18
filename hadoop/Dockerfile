@@ -1,11 +1,12 @@
 FROM eclipse-temurin:8-jre-alpine
 
 # Установка необходимых пакетов
-RUN apt-get update && apt-get install -y \
+RUN apk update && apk add --no-cache \
     wget \
     curl \
     python3 \
-    && rm -rf /var/lib/apt/lists/*
+    bash
+
 
 # Скачивание и установка Hadoop
 ENV HADOOP_VERSION 3.3.6
