@@ -1,4 +1,4 @@
-FROM openjdk:8-jre-slim
+FROM eclipse-temurin:8-jre-alpine
 
 # Установка необходимых пакетов
 RUN apt-get update && apt-get install -y \
