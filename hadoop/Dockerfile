@@ -32,9 +32,6 @@ COPY yarn-site.xml $HADOOP_CONF_DIR/
 COPY run-tasks.sh /run-tasks.sh
 RUN chmod +x /run-tasks.sh
 
-# Создание тестового файла для wordcount
-COPY test-data.txt /test-data.txt
-
 WORKDIR /app
 
 ENTRYPOINT ["/run-tasks.sh"]
