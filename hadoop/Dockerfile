@@ -1,11 +1,10 @@
-FROM openjdk:8-jdk
+FROM openjdk:8-jre-slim
 
 # Установка необходимых пакетов
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
     python3 \
-    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Скачивание и установка Hadoop
