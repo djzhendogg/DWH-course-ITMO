@@ -9,4 +9,12 @@
         <name>hadoop.tmp.dir</name>
         <value>/tmp/hadoop-root</value>
     </property>
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://namenode:8020</value>
+    </property>
+    <property>
+        <name>dfs.client.use.datanode.hostname</name>
+        <value>true</value>
+    </property>
 </configuration>
