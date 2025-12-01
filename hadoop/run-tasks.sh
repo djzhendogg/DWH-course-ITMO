@@ -5,30 +5,8 @@ set -e
 echo "Starting Hadoop tasks..."
 
 export HADOOP_HOME=/opt/hadoop
-export $HDFS_ENDPOINT=hdfs://192.168.34.2:8020
-export WAIT_TIMEOUT=5000
 export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
 export PATH=$HADOOP_HOME/bin:$PATH
-
-echo "Waiting for HDFS to be ready at $HDFS_ENDPOINT..."
-timeout $WAIT_TIMEOUT bash -c '
-  until hdfs dfs -fs $0 -test -d / &>/dev/null; do
-    echo "HDFS not ready, waiting 5 seconds..."
-    sleep 10
-  done
-' $HDFS_ENDPOINT
-echo "HDFS is ready. Starting tasks."
-
-# --- СИНХРОНИЗАЦИЯ С ТЕСТОВОЙ СИСТЕМОЙ ---
-# Ждем, пока тестовая система закончит свою подготовку (создаст файл /shadow.txt)
-echo "Waiting for input file /shadow.txt to appear..."
-timeout $WAIT_TIMEOUT bash -c '
-  until hdfs dfs -fs $0 -test -e /shadow.txt &>/dev/null; do
-    echo "File /shadow.txt not found, waiting 5 seconds..."
-    sleep 10
-  done
-' $HDFS_ENDPOINT
-echo "Test system setup is complete."
 
 # Функция для проверки доступности HDFS
 check_hdfs_availability() {
@@ -42,6 +20,16 @@ check_hdfs_availability() {
     fi
 }
 
+check_test_availability() {
+    echo "Checking shadow.txt availability..."
+    if hdfs dfs -test -e /shadow.txt; then
+        echo "shadow.txt is available"
+        return 0
+    else
+        echo "shadow.txt is not available"
+        return 1
+    fi
+}
 # Функция для ожидания доступности HDFS
 wait_for_hdfs() {
     local max_attempts=30
@@ -60,8 +48,27 @@ wait_for_hdfs() {
     return 1
 }
 
+wait_for_test() {
+    local max_attempts=30
+    local attempt=1
+
+    while [ $attempt -le $max_attempts ]; do
+        if check_test_availability; then
+            return 0
+        fi
+        echo "Attempt $attempt/$max_attempts: TEST not ready, waiting 10 seconds..."
+        sleep 10
+        attempt=$((attempt + 1))
+    done
+
+    echo "TEST is not available after $max_attempts attempts"
+    return 1
+}
+
 # Ожидаем доступности HDFS
 wait_for_hdfs
+
+wait_for_test
 
 echo "=== Starting HDFS tasks ==="
 
