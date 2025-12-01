@@ -24,6 +24,10 @@ for i in {1..30}; do
     sleep 5
 done
 
+echo "=== HDFS root directory ==="
+hdfs dfs -ls /
+echo "==========================="
+
 ######################################
 #  TASK 1: CREATE /createme
 ######################################
@@ -34,11 +38,9 @@ echo "✓ Directory /createme created"
 ######################################
 #  TASK 2: REMOVE /delme
 ######################################
+
 echo "2. Removing /delme ..."
 hdfs dfs -rm -r -f /delme >/dev/null 2>&1 || true
-echo "=== HDFS root directory ==="
-hdfs dfs -ls /
-echo "==========================="
 # double-check
 if hdfs dfs -test -e /delme; then
     echo "ERROR: /delme still exists!"
