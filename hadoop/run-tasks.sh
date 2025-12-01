@@ -5,7 +5,7 @@ set -e
 echo "Starting Hadoop tasks..."
 
 export HADOOP_HOME=/opt/hadoop
-export HADOOP_HOME=hdfs://192.168.34.2:8020
+export $HDFS_ENDPOINT=hdfs://192.168.34.2:8020
 export WAIT_TIMEOUT=5000
 export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
 export PATH=$HADOOP_HOME/bin:$PATH
