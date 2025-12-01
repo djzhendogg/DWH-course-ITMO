@@ -6,7 +6,7 @@ echo "Starting Hadoop tasks..."
 
 export HADOOP_HOME=/opt/hadoop
 export HADOOP_HOME=hdfs://192.168.34.2:8020
-export WAIT_TIMEOUT=120
+export WAIT_TIMEOUT=5000
 export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
 export PATH=$HADOOP_HOME/bin:$PATH
 
@@ -14,7 +14,7 @@ echo "Waiting for HDFS to be ready at $HDFS_ENDPOINT..."
 timeout $WAIT_TIMEOUT bash -c '
   until hdfs dfs -fs $0 -test -d / &>/dev/null; do
     echo "HDFS not ready, waiting 5 seconds..."
-    sleep 5
+    sleep 10
   done
 ' $HDFS_ENDPOINT
 echo "HDFS is ready. Starting tasks."
@@ -25,7 +25,7 @@ echo "Waiting for input file /shadow.txt to appear..."
 timeout $WAIT_TIMEOUT bash -c '
   until hdfs dfs -fs $0 -test -e /shadow.txt &>/dev/null; do
     echo "File /shadow.txt not found, waiting 5 seconds..."
-    sleep 5
+    sleep 10
   done
 ' $HDFS_ENDPOINT
 echo "Test system setup is complete."
