@@ -139,9 +139,10 @@ if ! hdfs dfs -test -e /wordcount_output/part-r-00000; then
 fi
 
 # sum all case-insensitive occurrences
-INNSMOUTH_COUNT=$(hdfs dfs -cat /wordcount_output/part-r-00000 \
-    | grep -i -w "Innsmouth" \
-    | awk '{sum += $2} END{print sum+0}')
+#INNSMOUTH_COUNT=$(hdfs dfs -cat /wordcount_output/part-r-00000 \
+#    | grep -i -w "Innsmouth" \
+#    | awk '{sum += $2} END{print sum+0}')
+INNSMOUTH_COUNT=$(hdfs dfs -cat /wordcount_output/part-r-00000 | grep -w "Innsmouth" | awk '{print $2}')
 
 echo "Found $INNSMOUTH_COUNT occurrences of Innsmouth"
 
