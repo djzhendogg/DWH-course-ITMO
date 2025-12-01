@@ -1,4 +1,5 @@
 #!/bin/bash
+
 set -e
 
 echo "Starting Hadoop tasks..."
@@ -7,27 +8,56 @@ export HADOOP_HOME=/opt/hadoop
 export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
 export PATH=$HADOOP_HOME/bin:$PATH
 
-######################################
-#  WAIT FOR HDFS
-######################################
-check_hdfs() {
-    hdfs dfs -ls / >/dev/null 2>&1
+# Функция для проверки доступности HDFS
+check_hdfs_availability() {
+    echo "Checking HDFS availability..."
+    if hdfs dfs -ls / > /dev/null 2>&1; then
+        echo "HDFS is available"
+        return 0
+    else
+        echo "HDFS is not available"
+        return 1
+    fi
 }
 
-echo "Waiting for HDFS..."
-for i in {1..30}; do
-    if check_hdfs; then
-        echo "HDFS is available."
-        break
-    fi
-    echo "HDFS not ready, retry $i/30..."
-    sleep 5
-done
+# Функция для ожидания доступности HDFS
+wait_for_hdfs() {
+    local max_attempts=30
+    local attempt=1
+
+    while [ $attempt -le $max_attempts ]; do
+        if check_hdfs_availability; then
+            return 0
+        fi
+        echo "Attempt $attempt/$max_attempts: HDFS not ready, waiting 10 seconds..."
+        sleep 10
+        attempt=$((attempt + 1))
+    done
+
+    echo "HDFS is not available after $max_attempts attempts"
+    return 1
+}
+
+# Ожидаем доступности HDFS
+wait_for_hdfs
+
+echo "=== Starting HDFS tasks ==="
 
 echo "=== HDFS root directory ==="
 hdfs dfs -ls /
 echo "==========================="
-
+echo "=== HDFS app directory ==="
+hdfs dfs -ls /app/
+echo "==========================="
+echo "=== HDFS opt/hadoop directory ==="
+hdfs dfs -ls /opt/hadoop/
+echo "==========================="
+echo "=== HDFS root directory ==="
+hdfs dfs -ls /root/
+echo "==========================="
+echo "=== HDFS tmp directory ==="
+hdfs dfs -ls /tmp/
+echo "==========================="
 ######################################
 #  TASK 1: CREATE /createme
 ######################################
