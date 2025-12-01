@@ -46,18 +46,26 @@ echo "=== Starting HDFS tasks ==="
 echo "=== HDFS root directory ==="
 hdfs dfs -ls /
 echo "==========================="
-echo "=== HDFS app directory ==="
-hdfs dfs -ls /app/
-echo "==========================="
-echo "=== HDFS opt/hadoop directory ==="
-hdfs dfs -ls /opt/hadoop/
-echo "==========================="
-echo "=== HDFS root directory ==="
-hdfs dfs -ls /root/
-echo "==========================="
+if hdfs dfs -test -e /app; then
+    echo "=== HDFS app directory ==="
+    hdfs dfs -ls /app
+    echo "==========================="
+fi
+if hdfs dfs -test -e /app; then
+    echo "=== HDFS opt/hadoop directory ==="
+    hdfs dfs -ls /opt/hadoop
+    echo "==========================="
+fi
+if hdfs dfs -test -e /root; then
+    echo "=== HDFS root directory ==="
+    hdfs dfs -ls /root
+    echo "==========================="
+fi
+if hdfs dfs -test -e /tmp; then
 echo "=== HDFS tmp directory ==="
-hdfs dfs -ls /tmp/
+hdfs dfs -ls /tmp
 echo "==========================="
+fi
 ######################################
 #  TASK 1: CREATE /createme
 ######################################
