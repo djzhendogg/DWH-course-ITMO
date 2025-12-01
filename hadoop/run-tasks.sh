@@ -35,7 +35,7 @@ echo "✓ Directory /createme created"
 #  TASK 2: REMOVE /delme
 ######################################
 echo "2. Removing /delme ..."
-hdfs dfs -rm -r -f delme >/dev/null 2>&1 || true
+hdfs dfs -rm -r -f /delme >/dev/null 2>&1 || true
 echo "=== HDFS root directory ==="
 hdfs dfs -ls /
 echo "==========================="

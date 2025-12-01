@@ -29,6 +29,6 @@ COPY yarn-site.xml $HADOOP_CONF_DIR/
 COPY run-tasks.sh /run-tasks.sh
 RUN chmod +x /run-tasks.sh
 
-# WORKDIR /app
+WORKDIR /app
 
 ENTRYPOINT ["/run-tasks.sh"]
