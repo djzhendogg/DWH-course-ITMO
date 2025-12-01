@@ -5,8 +5,30 @@ set -e
 echo "Starting Hadoop tasks..."
 
 export HADOOP_HOME=/opt/hadoop
+export HADOOP_HOME=hdfs://192.168.34.2:8020
+export WAIT_TIMEOUT=120
 export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
 export PATH=$HADOOP_HOME/bin:$PATH
+
+echo "Waiting for HDFS to be ready at $HDFS_ENDPOINT..."
+timeout $WAIT_TIMEOUT bash -c '
+  until hdfs dfs -fs $0 -test -d / &>/dev/null; do
+    echo "HDFS not ready, waiting 5 seconds..."
+    sleep 5
+  done
+' $HDFS_ENDPOINT
+echo "HDFS is ready. Starting tasks."
+
+# --- СИНХРОНИЗАЦИЯ С ТЕСТОВОЙ СИСТЕМОЙ ---
+# Ждем, пока тестовая система закончит свою подготовку (создаст файл /shadow.txt)
+echo "Waiting for input file /shadow.txt to appear..."
+timeout $WAIT_TIMEOUT bash -c '
+  until hdfs dfs -fs $0 -test -e /shadow.txt &>/dev/null; do
+    echo "File /shadow.txt not found, waiting 5 seconds..."
+    sleep 5
+  done
+' $HDFS_ENDPOINT
+echo "Test system setup is complete."
 
 # Функция для проверки доступности HDFS
 check_hdfs_availability() {
@@ -46,6 +68,7 @@ echo "=== Starting HDFS tasks ==="
 echo "=== HDFS root directory ==="
 hdfs dfs -ls /
 echo "==========================="
+
 if hdfs dfs -test -e /app; then
     echo "=== HDFS app directory ==="
     hdfs dfs -ls /app
