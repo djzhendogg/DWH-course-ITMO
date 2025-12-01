@@ -76,26 +76,6 @@ echo "=== HDFS root directory ==="
 hdfs dfs -ls /
 echo "==========================="
 
-if hdfs dfs -test -e /app; then
-    echo "=== HDFS app directory ==="
-    hdfs dfs -ls /app
-    echo "==========================="
-fi
-if hdfs dfs -test -e /app; then
-    echo "=== HDFS opt/hadoop directory ==="
-    hdfs dfs -ls /opt/hadoop
-    echo "==========================="
-fi
-if hdfs dfs -test -e /root; then
-    echo "=== HDFS root directory ==="
-    hdfs dfs -ls /root
-    echo "==========================="
-fi
-if hdfs dfs -test -e /tmp; then
-echo "=== HDFS tmp directory ==="
-hdfs dfs -ls /tmp
-echo "==========================="
-fi
 ######################################
 #  TASK 1: CREATE /createme
 ######################################
@@ -134,7 +114,7 @@ echo "✓ File /nonnull.txt created"
 ######################################
 echo "4. Running wordcount on /shadow.txt ..."
 
-if ! hdfs dfs -test -e shadow.txt; then
+if ! hdfs dfs -test -e /shadow.txt; then
     echo "ERROR: /shadow.txt does not exist in HDFS!"
     exit 1
 fi
