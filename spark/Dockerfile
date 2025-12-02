@@ -1,12 +1,19 @@
-FROM python:3.9-slim
+FROM python:3.9-bookworm
 
 # Установка системных зависимостей
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
-    openjdk-11-jdk \
     procps \
+    gnupg \
+    software-properties-common \
     && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && \
+    apt-get install -y openjdk-11-jdk && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN java -version
 
 # Установка Hadoop
 ENV HADOOP_VERSION=3.3.6
