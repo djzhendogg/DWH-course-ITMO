@@ -33,21 +33,21 @@ ENV PATH=$PATH:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin:${SPARK_HOME}/bin:${SPARK_
 ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 ENV PYTHONPATH=$SPARK_HOME/python:$PYTHONPATH
 
+WORKDIR /app
+# Установка Python зависимостей
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Настройка Hadoop для работы с HDFS
 COPY core-site.xml ${HADOOP_CONF_DIR}/
 COPY hdfs-site.xml ${HADOOP_CONF_DIR}/
 
 # Копирование файлов приложения
-WORKDIR /app
-COPY requirements.txt .
+COPY data .
 COPY spark_app.py .
 COPY entrypoint.sh .
-COPY wait-for-hadoop.sh .
-
-# Установка Python зависимостей
-RUN pip install --no-cache-dir -r requirements.txt
 
 # Создание пользователя и настройка разрешений
-RUN chmod +x entrypoint.sh wait-for-hadoop.sh
+RUN chmod +x entrypoint.sh
 
 ENTRYPOINT ["./entrypoint.sh"]

@@ -45,6 +45,11 @@ fi
 echo "Creating empty file on HDFS..."
 hdfs dfs -touchz /sparkExperiments.txt
 
+# копирование датасетов
+echo "Copy datasets..."
+hdfs dfs -rm -r -f /ml-latest-small 2>/dev/null || true
+hdfs dfs -put /data/ml-latest-small /
+
 # Запуск Spark приложения
 echo "Running Spark application..."
 python /app/spark_app.py
