@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && \
-    apt-get install -y openjdk-11-jdk && \
+    apt-get install -y openjdk-17-jdk && \
     rm -rf /var/lib/apt/lists/*
 
 RUN java -version
@@ -37,7 +37,7 @@ RUN wget -q https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-$
 
 # Настройка переменных окружения
 ENV PATH=$PATH:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin:${SPARK_HOME}/bin:${SPARK_HOME}/sbin
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV PYTHONPATH=$SPARK_HOME/python:$PYTHONPATH
 
 WORKDIR /app
