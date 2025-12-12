@@ -28,3 +28,10 @@ CREATE TABLE dm_posts (
     author_id VARCHAR(21) NOT NULL,
     created_at TIMESTAMP NOT NULL
 );
+CREATE INDEX idx_raw_events_type ON raw_events(event_type);
+CREATE INDEX idx_raw_events_user ON raw_events(user_id);
+CREATE INDEX idx_raw_events_post ON raw_events(post_id);
+CREATE INDEX idx_raw_events_created ON raw_events(created_at);
+CREATE INDEX idx_post_stats_likes ON f_hourly_post_stats(hour_start, likes_count DESC);
+CREATE INDEX idx_user_stats_engagement ON f_hourly_user_stats(hour_start, engagement_score DESC);
+CREATE INDEX idx_user_received_likes ON f_hourly_user_stats(hour_start, likes_received DESC);
