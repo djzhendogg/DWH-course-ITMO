@@ -24,7 +24,7 @@ CREATE TABLE f_hourly_user_stats (
     PRIMARY KEY (hour_start, user_id)
 );
 CREATE TABLE dm_posts (
-    post_id VARCHAR(21) PRIMARY NOT NULL,
+    post_id VARCHAR(21) PRIMARY KEY,
     author_id VARCHAR(21) NOT NULL,
     created_at TIMESTAMP NOT NULL
 );
