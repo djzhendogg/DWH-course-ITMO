@@ -7,148 +7,208 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class Aggregator:
+class PostgresAggregator:
     def __init__(self, db_params):
         """
-        Инициализация агрегатора
-
+        Инициализация подключения к базе данных
         :param db_params: параметры подключения к БД
         """
-        self.db_params = db_params
-        self.conn = None
+        self.connection = psycopg2.connect(**db_params)
+        self.cursor = self.connection.cursor(cursor_factory=RealDictCursor)
 
-    def connect(self):
-        """Установка соединения с БД"""
-        try:
-            self.conn = psycopg2.connect(**self.db_params)
-            logger.info("Успешное подключение к БД")
-        except Exception as e:
-            logger.error(f"Ошибка подключения к БД: {e}")
-            raise
-
-    def disconnect(self):
-        """Закрытие соединения с БД"""
-        if self.conn:
-            self.conn.close()
-            logger.info("Соединение с БД закрыто")
-
-    def get_hour_start(self, timestamp):
+    def get_hourly_ranges(self):
         """
-        Округление timestamp до начала часа
-
-        :param timestamp: временная метка
-        :return: timestamp начала часа
+        Получаем все уникальные часы из данных
+        Возвращает список кортежей (hour_start, hour_end)
         """
-        return timestamp.replace(minute=0, second=0, microsecond=0)
-
-    def aggregate_hourly_post_stats(self, hour_start=None):
-        """
-        Агрегация статистики по постам за час
-
-        :param hour_start: начало часа для агрегации (если None - текущий час)
-        """
-        if hour_start is None:
-            hour_start = self.get_hour_start(datetime.now())
-        else:
-            hour_start = self.get_hour_start(hour_start)
-
-        hour_end = hour_start + timedelta(hours=1)
-
         query = """
-        INSERT INTO f_hourly_post_stats (hour_start, post_id, likes_count, reposts_count)
         SELECT 
-            %s as hour_start,
-            re.post_id,
-            COUNT(CASE WHEN re.event_type = 'like' THEN 1 END) as likes_count,
-            COUNT(CASE WHEN re.event_type = 'repost' THEN 1 END) as reposts_count
-        FROM raw_events re
-        WHERE re.created_at >= %s 
-            AND re.created_at < %s
-        GROUP BY re.post_id
+            DATE_TRUNC('hour', created_at) as hour_start,
+            DATE_TRUNC('hour', created_at) + INTERVAL '1 hour' as hour_end
+        FROM (
+            SELECT created_at FROM raw_events
+            UNION ALL
+            SELECT created_at FROM dm_posts
+        ) all_events
+        GROUP BY DATE_TRUNC('hour', created_at)
+        ORDER BY hour_start
+        """
+
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
+
+    def aggregate_hourly_post_stats(self, hour_start, hour_end):
+        """
+        Агрегирует статистику по постам за указанный час
+        """
+        query = """
+        WITH hourly_events AS (
+            SELECT 
+                post_id,
+                event_type,
+                COUNT(*) as count
+            FROM raw_events
+            WHERE created_at >= %s 
+              AND created_at < %s
+            GROUP BY post_id, event_type
+        ),
+        post_likes AS (
+            SELECT 
+                post_id,
+                SUM(count) as likes_count
+            FROM hourly_events
+            WHERE event_type = 'like'
+            GROUP BY post_id
+        ),
+        post_reposts AS (
+            SELECT 
+                post_id,
+                SUM(count) as reposts_count
+            FROM hourly_events
+            WHERE event_type = 'repost'
+            GROUP BY post_id
+        ),
+        all_posts_in_hour AS (
+            SELECT DISTINCT post_id
+            FROM hourly_events
+        )
+        SELECT 
+            a.post_id,
+            COALESCE(l.likes_count, 0) as likes_count,
+            COALESCE(r.reposts_count, 0) as reposts_count
+        FROM all_posts_in_hour a
+        LEFT JOIN post_likes l ON a.post_id = l.post_id
+        LEFT JOIN post_reposts r ON a.post_id = r.post_id
+        """
+
+        self.cursor.execute(query, (hour_start, hour_end))
+        return self.cursor.fetchall()
+
+    def aggregate_hourly_user_stats(self, hour_start, hour_end):
+        """
+        Агрегирует статистику по пользователям за указанный час
+        """
+        query = """
+        WITH hourly_events AS (
+            SELECT 
+                user_id,
+                event_type,
+                COUNT(*) as count
+            FROM raw_events
+            WHERE created_at >= %s 
+              AND created_at < %s
+            GROUP BY user_id, event_type
+        ),
+        user_posts AS (
+            SELECT 
+                author_id as user_id,
+                COUNT(*) as posts_count
+            FROM dm_posts
+            WHERE created_at >= %s 
+              AND created_at < %s
+            GROUP BY author_id
+        ),
+        likes_given AS (
+            SELECT 
+                user_id,
+                SUM(count) as likes_given
+            FROM hourly_events
+            WHERE event_type = 'like'
+            GROUP BY user_id
+        ),
+        reposts_made AS (
+            SELECT 
+                user_id,
+                SUM(count) as reposts_made
+            FROM hourly_events
+            WHERE event_type = 'repost'
+            GROUP BY user_id
+        ),
+        post_events AS (
+            SELECT 
+                p.author_id as user_id,
+                e.event_type,
+                SUM(e.count) as count
+            FROM dm_posts p
+            JOIN (
+                SELECT 
+                    post_id,
+                    event_type,
+                    COUNT(*) as count
+                FROM raw_events
+                WHERE created_at >= %s 
+                  AND created_at < %s
+                GROUP BY post_id, event_type
+            ) e ON p.post_id = e.post_id
+            GROUP BY p.author_id, e.event_type
+        ),
+        likes_received AS (
+            SELECT 
+                user_id,
+                SUM(count) as likes_received
+            FROM post_events
+            WHERE event_type = 'like'
+            GROUP BY user_id
+        ),
+        reposts_received AS (
+            SELECT 
+                user_id,
+                SUM(count) as reposts_received
+            FROM post_events
+            WHERE event_type = 'repost'
+            GROUP BY user_id
+        ),
+        all_users_in_hour AS (
+            SELECT DISTINCT user_id FROM hourly_events
+            UNION
+            SELECT DISTINCT user_id FROM user_posts
+        )
+        SELECT 
+            u.user_id,
+            COALESCE(lg.likes_given, 0) as likes_given,
+            COALESCE(lr.likes_received, 0) as likes_received,
+            COALESCE(rm.reposts_made, 0) as reposts_made,
+            COALESCE(rr.reposts_received, 0) as reposts_received,
+            (COALESCE(rm.reposts_made, 0) * 37 + COALESCE(lg.likes_given, 0) * 3) as engagement_score
+        FROM all_users_in_hour u
+        LEFT JOIN likes_given lg ON u.user_id = lg.user_id
+        LEFT JOIN likes_received lr ON u.user_id = lr.user_id
+        LEFT JOIN reposts_made rm ON u.user_id = rm.user_id
+        LEFT JOIN reposts_received rr ON u.user_id = rr.user_id
+        """
+
+        self.cursor.execute(query, (hour_start, hour_end, hour_start, hour_end, hour_start, hour_end))
+        return self.cursor.fetchall()
+
+    def insert_post_stats(self, hour_start, post_stats):
+        """
+        Вставляет агрегированные данные по постам в таблицу f_hourly_post_stats
+        """
+        insert_query = """
+        INSERT INTO f_hourly_post_stats 
+            (hour_start, post_id, likes_count, reposts_count)
+        VALUES (%s, %s, %s, %s)
         ON CONFLICT (hour_start, post_id) 
-        DO UPDATE SET
+        DO UPDATE SET 
             likes_count = EXCLUDED.likes_count,
             reposts_count = EXCLUDED.reposts_count
         """
 
-        try:
-            with self.conn.cursor() as cursor:
-                cursor.execute(query, (hour_start, hour_start, hour_end))
-                self.conn.commit()
-                logger.info(f"Агрегирована статистика по постам за {hour_start}")
-        except Exception as e:
-            self.conn.rollback()
-            logger.error(f"Ошибка агрегации статистики по постам: {e}")
-            raise
+        for stat in post_stats:
+            self.cursor.execute(insert_query,
+                                (hour_start, stat['post_id'], stat['likes_count'], stat['reposts_count']))
 
-    def aggregate_hourly_user_stats(self, hour_start=None):
+    def insert_user_stats(self, hour_start, user_stats):
         """
-        Агрегация статистики по пользователям за час
-
-        :param hour_start: начало часа для агрегации (если None - текущий час)
+        Вставляет агрегированные данные по пользователям в таблицу f_hourly_user_stats
         """
-        if hour_start is None:
-            hour_start = self.get_hour_start(datetime.now())
-        else:
-            hour_start = self.get_hour_start(hour_start)
-
-        hour_end = hour_start + timedelta(hours=1)
-
-        # CTE для подсчета лайков и репостов по пользователям
-        query = """
-        WITH user_actions AS (
-            -- Действия пользователя (лайки и репосты, которые он сделал)
-            SELECT 
-                re.user_id,
-                COUNT(CASE WHEN re.event_type = 'like' THEN 1 END) as likes_given,
-                COUNT(CASE WHEN re.event_type = 'repost' THEN 1 END) as reposts_made,
-                SUM(CASE 
-                    WHEN re.event_type = 'like' THEN 3
-                    WHEN re.event_type = 'repost' THEN 37
-                    ELSE 0 
-                END) as engagement_score
-            FROM raw_events re
-            WHERE re.created_at >= %s 
-                AND re.created_at < %s
-            GROUP BY re.user_id
-        ),
-        post_reactions AS (
-            -- Реакции на посты пользователя (лайки и репосты, которые получили его посты)
-            SELECT 
-                dp.author_id as user_id,
-                COUNT(CASE WHEN re.event_type = 'like' THEN 1 END) as likes_received,
-                COUNT(CASE WHEN re.event_type = 'repost' THEN 1 END) as reposts_received
-            FROM raw_events re
-            JOIN dm_posts dp ON re.post_id = dp.post_id
-            WHERE re.created_at >= %s 
-                AND re.created_at < %s
-            GROUP BY dp.author_id
-        ),
-        user_stats AS (
-            -- Объединение статистики
-            SELECT 
-                COALESCE(ua.user_id, pr.user_id) as user_id,
-                COALESCE(ua.likes_given, 0) as likes_given,
-                COALESCE(pr.likes_received, 0) as likes_received,
-                COALESCE(ua.reposts_made, 0) as reposts_made,
-                COALESCE(pr.reposts_received, 0) as reposts_received,
-                COALESCE(ua.engagement_score, 0) as engagement_score
-            FROM user_actions ua
-            FULL OUTER JOIN post_reactions pr ON ua.user_id = pr.user_id
-        )
-        INSERT INTO f_hourly_user_stats (hour_start, user_id, likes_given, likes_received, 
-                                        reposts_made, reposts_received, engagement_score)
-        SELECT 
-            %s as hour_start,
-            us.user_id,
-            us.likes_given,
-            us.likes_received,
-            us.reposts_made,
-            us.reposts_received,
-            us.engagement_score
-        FROM user_stats us
+        insert_query = """
+        INSERT INTO f_hourly_user_stats 
+            (hour_start, user_id, likes_given, likes_received, 
+             reposts_made, reposts_received, engagement_score)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (hour_start, user_id) 
-        DO UPDATE SET
+        DO UPDATE SET 
             likes_given = EXCLUDED.likes_given,
             likes_received = EXCLUDED.likes_received,
             reposts_made = EXCLUDED.reposts_made,
@@ -156,29 +216,18 @@ class Aggregator:
             engagement_score = EXCLUDED.engagement_score
         """
 
-        try:
-            with self.conn.cursor() as cursor:
-                cursor.execute(query, (hour_start, hour_end, hour_start, hour_end, hour_start))
-                self.conn.commit()
-                logger.info(f"Агрегирована статистика по пользователям за {hour_start}")
-        except Exception as e:
-            self.conn.rollback()
-            logger.error(f"Ошибка агрегации статистики по пользователям: {e}")
-            raise
+        for stat in user_stats:
+            self.cursor.execute(insert_query,
+                                (hour_start, stat['user_id'],
+                                 stat['likes_given'], stat['likes_received'],
+                                 stat['reposts_made'], stat['reposts_received'],
+                                 stat['engagement_score']))
 
-    def get_most_liked_users(self, hour_start=None, limit=10):
+    def get_most_liked_users(self, hour_start, limit=10):
         """
-        Получение наиболее залайканных пользователей за час
-
-        :param hour_start: начало часа (если None - текущий час)
-        :param limit: количество пользователей в результате
-        :return: список пользователей с количеством лайков
+        Получает наиболее залайканных пользователей за час
+        (пользователи с наибольшим likes_received)
         """
-        if hour_start is None:
-            hour_start = self.get_hour_start(datetime.now())
-        else:
-            hour_start = self.get_hour_start(hour_start)
-
         query = """
         SELECT 
             user_id,
@@ -189,27 +238,14 @@ class Aggregator:
         LIMIT %s
         """
 
-        try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, (hour_start, limit))
-                return cursor.fetchall()
-        except Exception as e:
-            logger.error(f"Ошибка получения наиболее залайканных пользователей: {e}")
-            return []
+        self.cursor.execute(query, (hour_start, limit))
+        return self.cursor.fetchall()
 
-    def get_top_engaged_users(self, hour_start=None, limit=10):
+    def get_most_engaged_users(self, hour_start, limit=10):
         """
-        Получение пользователей с наибольшей вовлеченностью за час
-
-        :param hour_start: начало часа (если None - текущий час)
-        :param limit: количество пользователей в результате
-        :return: список пользователей с engagement_score
+        Получает наиболее вовлечённых пользователей за час
+        (пользователи с наибольшим engagement_score)
         """
-        if hour_start is None:
-            hour_start = self.get_hour_start(datetime.now())
-        else:
-            hour_start = self.get_hour_start(hour_start)
-
         query = """
         SELECT 
             user_id,
@@ -222,115 +258,151 @@ class Aggregator:
         LIMIT %s
         """
 
+        self.cursor.execute(query, (hour_start, limit))
+        return self.cursor.fetchall()
+
+    def process_all_hours(self):
+        """
+        Основной метод для обработки всех часов
+        """
+        logger.info("Начинаем агрегацию данных по часам...")
+
+        hourly_ranges = self.get_hourly_ranges()
+        logger.info(f"Найдено {len(hourly_ranges)} часов для обработки")
+
+        for hour_range in hourly_ranges:
+            hour_start = hour_range['hour_start']
+            hour_end = hour_range['hour_end']
+
+            logger.info(f"Обработка часа: {hour_start}")
+
+            try:
+                # Агрегируем данные по постам
+                post_stats = self.aggregate_hourly_post_stats(hour_start, hour_end)
+                self.insert_post_stats(hour_start, post_stats)
+
+                # Агрегируем данные по пользователям
+                user_stats = self.aggregate_hourly_user_stats(hour_start, hour_end)
+                self.insert_user_stats(hour_start, user_stats)
+
+                # Получаем топ пользователей для этого часа
+                most_liked = self.get_most_liked_users(hour_start, 10)
+                most_engaged = self.get_most_engaged_users(hour_start, 10)
+
+                # Выводим информацию о топ пользователях
+                if most_liked:
+                    logger.info(f"Наиболее залайканные пользователи за {hour_start}:")
+                    for user in most_liked:
+                        logger.info(f"  {user['user_id']}: {user['likes_received']} лайков")
+
+                if most_engaged:
+                    logger.info(f"Наиболее вовлечённые пользователи за {hour_start}:")
+                    for user in most_engaged:
+                        logger.info(f"  {user['user_id']}: engagement={user['engagement_score']}")
+
+                self.connection.commit()
+                logger.info(f"Час {hour_start} успешно обработан")
+
+            except Exception as e:
+                self.connection.rollback()
+                logger.error(f"Ошибка при обработке часа {hour_start}: {e}")
+
+    def refresh_aggregations(self):
+        """
+        Полная пересборка всех агрегаций
+        """
+        logger.info("Начинаем полную пересборку агрегаций...")
+
+        # Очищаем существующие таблицы
+        self.cursor.execute("TRUNCATE TABLE f_hourly_post_stats")
+        self.cursor.execute("TRUNCATE TABLE f_hourly_user_stats")
+        self.connection.commit()
+
+        # Запускаем процесс агрегации
+        self.process_all_hours()
+
+        logger.info("Полная пересборка агрегаций завершена")
+
+    def incremental_update(self, last_hour=None):
+        """
+        Инкрементальное обновление агрегаций для последнего часа
+        :param last_hour: если указан, обновляет указанный час, иначе берет последний
+        """
+        if last_hour:
+            hour_start = last_hour
+        else:
+            # Берем последний час из данных
+            query = """
+            SELECT MAX(DATE_TRUNC('hour', created_at)) as last_hour
+            FROM (
+                SELECT created_at FROM raw_events
+                UNION ALL
+                SELECT created_at FROM dm_posts
+            ) all_events
+            """
+            self.cursor.execute(query)
+            result = self.cursor.fetchone()
+            hour_start = result['last_hour'] if result else None
+
+        if not hour_start:
+            logger.info("Нет данных для обновления")
+            return
+
+        hour_end = hour_start + timedelta(hours=1)
+        logger.info(f"Инкрементальное обновление для часа: {hour_start}")
+
         try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, (hour_start, limit))
-                return cursor.fetchall()
+            # Обновляем данные по постам
+            post_stats = self.aggregate_hourly_post_stats(hour_start, hour_end)
+            self.insert_post_stats(hour_start, post_stats)
+
+            # Обновляем данные по пользователям
+            user_stats = self.aggregate_hourly_user_stats(hour_start, hour_end)
+            self.insert_user_stats(hour_start, user_stats)
+
+            self.connection.commit()
+            logger.info(f"Инкрементальное обновление для часа {hour_start} завершено")
+
         except Exception as e:
-            logger.error(f"Ошибка получения наиболее вовлеченных пользователей: {e}")
-            return []
+            self.connection.rollback()
+            logger.error(f"Ошибка при инкрементальном обновлении: {e}")
 
-    def aggregate_all_for_hour(self, hour_start=None):
-        """
-        Выполнение всех агрегаций за указанный час
-
-        :param hour_start: начало часа для агрегации
-        """
-        logger.info(f"Начало агрегации за {hour_start}")
-
-        # Агрегация по постам
-        self.aggregate_hourly_post_stats(hour_start)
-
-        # Агрегация по пользователям
-        self.aggregate_hourly_user_stats(hour_start)
-
-        logger.info(f"Завершена агрегация за {hour_start}")
-
-    def get_aggregation_status(self, hours_back=24):
-        """
-        Получение статуса агрегации за последние N часов
-
-        :param hours_back: количество часов для проверки
-        :return: статус агрегации
-        """
-        end_hour = self.get_hour_start(datetime.now())
-        start_hour = end_hour - timedelta(hours=hours_back)
-
-        query = """
-        SELECT 
-            hour_start,
-            COUNT(DISTINCT post_id) as posts_count,
-            COUNT(DISTINCT user_id) as users_count
-        FROM (
-            SELECT hour_start, post_id, NULL as user_id
-            FROM f_hourly_post_stats
-            WHERE hour_start >= %s AND hour_start < %s
-            UNION ALL
-            SELECT hour_start, NULL as post_id, user_id
-            FROM f_hourly_user_stats
-            WHERE hour_start >= %s AND hour_start < %s
-        ) combined
-        GROUP BY hour_start
-        ORDER BY hour_start DESC
-        """
-
-        try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, (start_hour, end_hour, start_hour, end_hour))
-                return cursor.fetchall()
-        except Exception as e:
-            logger.error(f"Ошибка получения статуса агрегации: {e}")
-            return []
+    def close(self):
+        """Закрывает соединение с БД"""
+        self.cursor.close()
+        self.connection.close()
 
 
-# Пример использования
 def main():
+    """
+    Пример использования агрегатора
+    """
     # Параметры подключения к БД
     db_params = {
         'host': 'localhost',
         'port': 5432,
         'database': 'your_database',
-        'user': 'your_user',
+        'user': 'your_username',
         'password': 'your_password'
     }
 
-    # Создание агрегатора
-    aggregator = Aggregator(db_params)
+    # Создаем экземпляр агрегатора
+    aggregator = PostgresAggregator(db_params)
 
     try:
-        # Подключение к БД
-        aggregator.connect()
+        # Вариант 1: Полная пересборка всех агрегаций
+        # aggregator.refresh_aggregations()
 
-        # Пример 1: Агрегация за текущий час
-        aggregator.aggregate_all_for_hour()
+        # Вариант 2: Инкрементальное обновление (для последнего часа)
+        aggregator.incremental_update()
 
-        # Пример 2: Получение наиболее залайканных пользователей
-        most_liked = aggregator.get_most_liked_users(limit=5)
-        print("Наиболее залайканные пользователи:")
-        for user in most_liked:
-            print(f"  Пользователь {user['user_id']}: {user['likes_received']} лайков")
+        # Получение статистики за конкретный час
+        # specific_hour = datetime(2024, 1, 1, 10, 0, 0)  # 1 января 2024, 10:00
+        # most_liked = aggregator.get_most_liked_users(specific_hour, 5)
+        # most_engaged = aggregator.get_most_engaged_users(specific_hour, 5)
 
-        # Пример 3: Получение наиболее вовлеченных пользователей
-        top_engaged = aggregator.get_top_engaged_users(limit=5)
-        print("\nНаиболее вовлеченные пользователи:")
-        for user in top_engaged:
-            print(f"  Пользователь {user['user_id']}: engagement_score={user['engagement_score']}")
-
-        # Пример 4: Получение статуса агрегации
-        status = aggregator.get_aggregation_status(hours_back=3)
-        print("\nСтатус агрегации за последние 3 часа:")
-        for stat in status:
-            print(f"  {stat['hour_start']}: {stat['posts_count']} постов, {stat['users_count']} пользователей")
-
-        # Пример 5: Агрегация за конкретный час (например, 2 часа назад)
-        two_hours_ago = datetime.now() - timedelta(hours=2)
-        aggregator.aggregate_all_for_hour(two_hours_ago)
-
-    except Exception as e:
-        logger.error(f"Ошибка в основном процессе: {e}")
     finally:
-        # Закрытие соединения
-        aggregator.disconnect()
+        aggregator.close()
 
 
 if __name__ == "__main__":
