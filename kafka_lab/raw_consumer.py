@@ -14,8 +14,6 @@ if __name__ == '__main__':
         'auto.offset.reset': 'smallest',
     }
 
-    print(conf['bootstrap.servers'])
-
     consumer = Consumer(conf)
     consumer.subscribe([os.getenv('LAB02_KAFKA_TOPIC')])
 
