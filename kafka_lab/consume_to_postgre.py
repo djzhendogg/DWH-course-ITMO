@@ -33,24 +33,43 @@ class KafkaToPostgresConsumer:
 
         self.consumer = Consumer(kafka_conf)
 
+    def process_new_post(self, event):
+        """Store new post mapping in dm_posts table"""
+        with self.pg_conn.cursor() as cursor:
+            try:
+                # Используем upsert для обновления существующих записей
+                upsert_query = """
+                    INSERT INTO dm_posts (post_id, author_id, created_at)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (post_id) 
+                    DO UPDATE SET 
+                        author_id = EXCLUDED.author_id,
+                        last_updated = EXCLUDED.created_at
+                    WHERE dm_posts.author_id != EXCLUDED.author_id;
+                """
+
+                cursor.execute(upsert_query,
+                               (event['post_id'], event['user_id'], event['created_at']))
+                self.pg_conn.commit()
+                print(f"Stored new post mapping: {event['post_id']} by {event['user_id']}")
+
+            except Exception as e:
+                self.pg_conn.rollback()
+                print(f"Error storing post mapping: {e}")
+                raise
+
     def parse_event(self, event_data):
-        """Parse Kafka event and extract relevant data for raw_events table"""
+        """Parse Kafka event and extract data"""
         try:
             data = json.loads(event_data)
-
-            # Фильтруем только like и repost события
-            if data.get('event_type') not in ['like', 'repost']:
-                return None
 
             # Преобразуем timestamp в datetime объект
             timestamp_str = data.get('timestamp')
             if timestamp_str:
-                # Удаляем 'Z' и преобразуем в datetime
                 if timestamp_str.endswith('Z'):
                     timestamp_str = timestamp_str[:-1]
                 created_at = datetime.fromisoformat(timestamp_str)
             else:
-                # Если нет timestamp, используем текущее время
                 created_at = datetime.now()
 
             return {
@@ -64,7 +83,7 @@ class KafkaToPostgresConsumer:
             print(f"Error parsing event: {e}")
             return None
 
-    def insert_to_postgres(self, events):
+    def save_to_raw_events(self, events):
         """Insert events into PostgreSQL"""
         if not events:
             return
@@ -125,7 +144,7 @@ class KafkaToPostgresConsumer:
 
                 # Вставляем батчем для эффективности
                 if len(events_batch) >= batch_size:
-                    self.insert_to_postgres(events_batch)
+                    self.save_to_raw_events(events_batch)
                     # Коммитим offset Kafka
                     self.consumer.commit(asynchronous=False)
                     events_batch = []
@@ -139,7 +158,7 @@ class KafkaToPostgresConsumer:
         finally:
             # Вставляем оставшиеся события
             if events_batch:
-                self.insert_to_postgres(events_batch)
+                self.save_to_raw_events(events_batch)
 
             # Закрываем соединения
             self.consumer.commit(asynchronous=False)
