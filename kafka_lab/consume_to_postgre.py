@@ -138,8 +138,14 @@ class KafkaToPostgresConsumer:
                 event_data = msg.value().decode('utf-8')
                 parsed_event = self.parse_event(event_data)
 
-                if parsed_event:
+                if parsed_event['event_type'] == 'new_post':
+                    self.process_new_post(parsed_event)
+                    counter += 1
+
+                    # 2. Сохраняем like/repost в raw_events
+                if parsed_event['event_type'] in ['like', 'repost']:
                     events_batch.append(parsed_event)
+                    self.save_to_raw_events([parsed_event])
                     counter += 1
 
                 # Вставляем батчем для эффективности
