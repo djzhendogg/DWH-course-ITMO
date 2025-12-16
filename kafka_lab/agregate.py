@@ -99,92 +99,77 @@ class PostgresAggregator:
         Агрегирует статистику по пользователям за указанный час
         """
         query = """
-            WITH hourly_raw_events AS (
-                SELECT 
-                    user_id,
-                    event_type,
-                    post_id,
-                    COUNT(*) as count
-                FROM raw_events
-                WHERE created_at >= %s 
-                  AND created_at < %s
-                GROUP BY user_id, event_type, post_id
-            ),
-            hourly_posts AS (
-                SELECT 
-                    post_id,
-                    author_id as user_id
-                FROM dm_posts
-                WHERE created_at >= %s 
-                  AND created_at < %s
-            ),
-            likes_given AS (
-                SELECT 
-                    user_id,
-                    SUM(count) as likes_given
-                FROM hourly_raw_events
-                WHERE event_type = 'like'
-                GROUP BY user_id
-            ),
-            reposts_made AS (
-                SELECT 
-                    user_id,
-                    SUM(count) as reposts_made
-                FROM hourly_raw_events
-                WHERE event_type = 'repost'
-                GROUP BY user_id
-            ),
-            post_events_for_user AS (
-                SELECT 
-                    p.author_id as user_id,
-                    e.event_type,
-                    SUM(e.count) as count
-                FROM raw_events e
-                JOIN dm_posts p ON e.post_id = p.post_id
-                WHERE e.created_at >= %s 
-                  AND e.created_at < %s
-                GROUP BY p.author_id, e.event_type
-            ),
-            likes_received AS (
-                SELECT 
-                    user_id,
-                    SUM(count) as likes_received
-                FROM post_events_for_user
-                WHERE event_type = 'like'
-                GROUP BY user_id
-            ),
-            reposts_received AS (
-                SELECT 
-                    user_id,
-                    SUM(count) as reposts_received
-                FROM post_events_for_user
-                WHERE event_type = 'repost'
-                GROUP BY user_id
-            ),
-            -- 3. Все пользователи, которые были активны в этот час
-            users_with_activity AS (
-                -- Пользователи, которые что-то делали
-                SELECT DISTINCT user_id FROM hourly_raw_events
-                UNION
-                -- Пользователи, чьи посты что-то получили
-                SELECT DISTINCT user_id FROM post_events_for_user
-                UNION
-                -- Пользователи, которые создали посты
-                SELECT DISTINCT user_id FROM hourly_posts
-            )
+        WITH hourly_events AS (
+            -- Все события за час с группировкой по user_id, event_type
             SELECT 
-                u.user_id,
-                COALESCE(lg.likes_given, 0) as likes_given,
-                COALESCE(lr.likes_received, 0) as likes_received,
-                COALESCE(rm.reposts_made, 0) as reposts_made,
-                COALESCE(rr.reposts_received, 0) as reposts_received,
-                (COALESCE(rm.reposts_made, 0) * 37 + COALESCE(lg.likes_given, 0) * 3) as engagement_score
-            FROM users_with_activity u
-            LEFT JOIN likes_given lg ON u.user_id = lg.user_id
-            LEFT JOIN likes_received lr ON u.user_id = lr.user_id
-            LEFT JOIN reposts_made rm ON u.user_id = rm.user_id
-            LEFT JOIN reposts_received rr ON u.user_id = rr.user_id
-            """
+                user_id,
+                event_type,
+                COUNT(*) as event_count
+            FROM raw_events
+            WHERE created_at >= %s 
+              AND created_at < %s
+            GROUP BY user_id, event_type
+        ),
+        hourly_posts AS (
+            -- Посты, созданные в этот час
+            SELECT 
+                author_id as user_id,
+                COUNT(*) as posts_count
+            FROM dm_posts
+            WHERE created_at >= %s 
+              AND created_at < %s
+            GROUP BY author_id
+        ),
+        -- Что пользователь сделал (активность)
+        user_actions AS (
+            SELECT 
+                user_id,
+                COALESCE(SUM(CASE WHEN event_type = 'like' THEN event_count END), 0) as likes_given,
+                COALESCE(SUM(CASE WHEN event_type = 'repost' THEN event_count END), 0) as reposts_made
+            FROM hourly_events
+            GROUP BY user_id
+        ),
+        -- События на постах пользователя (что получили его посты)
+        -- Сначала получаем все события за час с информацией об авторе поста
+        events_with_authors AS (
+            SELECT 
+                e.event_type,
+                p.author_id,
+                COUNT(*) as event_count
+            FROM raw_events e
+            JOIN dm_posts p ON e.post_id = p.post_id
+            WHERE e.created_at >= %s 
+              AND e.created_at < %s
+            GROUP BY e.event_type, p.author_id
+        ),
+        -- Затем агрегируем по авторам
+        post_actions AS (
+            SELECT 
+                author_id as user_id,
+                COALESCE(SUM(CASE WHEN event_type = 'like' THEN event_count END), 0) as likes_received,
+                COALESCE(SUM(CASE WHEN event_type = 'repost' THEN event_count END), 0) as reposts_received
+            FROM events_with_authors
+            GROUP BY author_id
+        ),
+        -- Все уникальные пользователи за час
+        all_users AS (
+            SELECT DISTINCT user_id FROM hourly_events
+            UNION
+            SELECT DISTINCT user_id FROM hourly_posts
+            UNION
+            SELECT DISTINCT user_id FROM post_actions
+        )
+        SELECT 
+            u.user_id,
+            COALESCE(ua.likes_given, 0) as likes_given,
+            COALESCE(pa.likes_received, 0) as likes_received,
+            COALESCE(ua.reposts_made, 0) as reposts_made,
+            COALESCE(pa.reposts_received, 0) as reposts_received,
+            (COALESCE(ua.reposts_made, 0) * 37 + COALESCE(ua.likes_given, 0) * 3) as engagement_score
+        FROM all_users u
+        LEFT JOIN user_actions ua ON u.user_id = ua.user_id
+        LEFT JOIN post_actions pa ON u.user_id = pa.user_id
+        """
 
         self.cursor.execute(query, (hour_start, hour_end, hour_start, hour_end, hour_start, hour_end))
         return self.cursor.fetchall()
