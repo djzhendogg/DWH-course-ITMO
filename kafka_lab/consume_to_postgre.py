@@ -2,6 +2,7 @@ import os
 import sys
 import json
 from datetime import datetime
+from time import sleep
 
 from dotenv import load_dotenv
 from confluent_kafka import Consumer, KafkaError
@@ -137,6 +138,7 @@ class KafkaToPostgresConsumer:
                     self.process_new_post(parsed_event)
                     self.consumer.commit(asynchronous=False)
                     counter += 1
+                    sleep(1)
 
                     # 2. Сохраняем like/repost в raw_events
                 if parsed_event['event_type'] in ['like', 'repost']:
@@ -150,9 +152,10 @@ class KafkaToPostgresConsumer:
                     # Коммитим offset Kafka
                     self.consumer.commit(asynchronous=False)
                     events_batch = []
+                    sleep(1)
 
                 # Для отладки выводим каждое N-ое сообщение
-                if counter % 10 == 0:
+                if counter % 100 == 0:
                     print(f"Processed {counter} events")
 
         except KeyboardInterrupt:
