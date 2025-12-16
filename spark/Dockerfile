@@ -56,5 +56,6 @@ COPY entrypoint.sh .
 
 # Создание пользователя и настройка разрешений
 RUN chmod +x entrypoint.sh
+RUN ln -s /usr/bin/python3 /usr/bin/python
 
 ENTRYPOINT ["./entrypoint.sh"]
