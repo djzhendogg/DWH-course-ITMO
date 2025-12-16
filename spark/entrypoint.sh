@@ -52,7 +52,7 @@ echo "==========================="
 # копирование датасетов
 echo "Copy datasets..."
 hdfs dfs -rm -r -f /ml-latest-small 2>/dev/null || true
-hdfs dfs -put /data/ml-latest-small /
+hdfs dfs -put /app/data/ml-latest-small /
 
 echo "=== HDFS root directory ==="
 hdfs dfs -ls /
