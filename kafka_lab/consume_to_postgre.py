@@ -2,7 +2,6 @@ import os
 import sys
 import json
 from datetime import datetime
-from time import sleep
 
 from dotenv import load_dotenv
 from confluent_kafka import Consumer, KafkaError
@@ -151,7 +150,6 @@ class KafkaToPostgresConsumer:
                     # Коммитим offset Kafka
                     self.consumer.commit(asynchronous=False)
                     events_batch = []
-                    sleep(1)
 
                 # Для отладки выводим каждое N-ое сообщение
                 if counter % 100 == 0:
