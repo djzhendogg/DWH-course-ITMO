@@ -138,7 +138,6 @@ class KafkaToPostgresConsumer:
                     self.process_new_post(parsed_event)
                     self.consumer.commit(asynchronous=False)
                     counter += 1
-                    sleep(1)
 
                     # 2. Сохраняем like/repost в raw_events
                 if parsed_event['event_type'] in ['like', 'repost']:
