@@ -160,6 +160,7 @@ class KafkaToPostgresConsumer:
         finally:
             # Вставляем оставшиеся события
             if events_batch:
+                print(f"Need to insert {len(events_batch)} left...")
                 self.save_to_raw_events(events_batch)
 
             # Закрываем соединения
