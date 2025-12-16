@@ -5,9 +5,11 @@ import logging
 from typing import Tuple, List
 
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, count, countDistinct, avg, udf, when
+from pyspark.sql.functions import col, count, countDistinct, avg, udf, when, unix_timestamp, from_unixtime, \
+    abs as spark_abs
 from pyspark.sql.types import FloatType, ArrayType, StringType
 from pyspark.sql import functions as F
+from pyspark import SparkContext
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import SGDRegressor
@@ -31,7 +33,7 @@ class SparkExperiment:
         self.hdfs_path = hdfs_path
         self.experiment_file = "/sparkExperiments.txt"
 
-        # Создание Spark сессии
+        # Создание Spark сессии с правильной конфигурацией для Python
         self.spark = SparkSession.builder \
             .appName("HadoopSparkExperiment") \
             .master("yarn") \
@@ -43,98 +45,63 @@ class SparkExperiment:
             .config("spark.yarn.queue", "default") \
             .config("spark.hadoop.fs.defaultFS", hdfs_path) \
             .config("spark.hadoop.yarn.resourcemanager.address", "192.168.34.2:8032") \
-            .config("spark.pyspark.python", "python3") \
-            .config("spark.executorEnv.PYSPARK_PYTHON", "python3") \
-            .config("spark.yarn.appMasterEnv.PYSPARK_PYTHON", "python3") \
+            .config("spark.pyspark.python", "python") \
+            .config("spark.executorEnv.PYSPARK_PYTHON", "python") \
             .getOrCreate()
 
+        self.sc = self.spark.sparkContext
         logger.info(f"Spark сессия создана с конфигурацией:")
         logger.info(f"Master: yarn")
         logger.info(f"Executors: 2")
         logger.info(f"HDFS: {hdfs_path}")
 
-    def write_to_experiment_file(self, content: str, mode: str = "append"):
+    def write_to_experiment_file(self, content: str):
         """
-        Запись строки в файл экспериментов на HDFS
-
-        Args:
-            content: Строка для записи
-            mode: 'append' или 'overwrite'
+        Запись строки в файл экспериментов на HDFS с добавлением
         """
         try:
             output_path = f"{self.hdfs_path}{self.experiment_file}"
 
-            # Если файл существует, читаем его содержимое
-            existing_content = []
-            try:
-                fs = self.spark._jvm.org.apache.hadoop.fs.FileSystem.get(
-                    self.spark._jsc.hadoopConfiguration()
-                )
-                path = self.spark._jvm.org.apache.hadoop.fs.Path(output_path)
-                if fs.exists(path):
-                    # Читаем существующий файл
-                    existing_rdd = self.spark.sparkContext.textFile(output_path)
-                    existing_content = existing_rdd.collect()
-            except Exception as e:
-                logger.warning(f"Не удалось прочитать существующий файл: {e}")
+            # Проверяем, существует ли файл
+            fs = self.spark._jvm.org.apache.hadoop.fs.FileSystem.get(
+                self.spark._jsc.hadoopConfiguration()
+            )
+            path = self.spark._jvm.org.apache.hadoop.fs.Path(output_path)
 
-            # Добавляем новое содержимое
-            if mode == "append":
-                all_content = existing_content + [content]
+            if fs.exists(path):
+                # Читаем существующий файл
+                existing_content = self.sc.textFile(output_path).collect()
+                # Добавляем новую строку
+                existing_content.append(content)
+                # Сохраняем все строки
+                self.sc.parallelize(existing_content).repartition(1).saveAsTextFile(f"{output_path}_new")
+
+                # Удаляем старый файл и переименовываем новый
+                fs.delete(path, True)
+                fs.rename(
+                    self.spark._jvm.org.apache.hadoop.fs.Path(f"{output_path}_new"),
+                    path
+                )
             else:
-                all_content = [content]
-
-            # Сохраняем все содержимое
-            self.spark.sparkContext.parallelize(all_content).saveAsTextFile(f"{output_path}_temp")
-
-            # Удаляем старый файл и переименовываем временный
-            try:
-                fs = self.spark._jvm.org.apache.hadoop.fs.FileSystem.get(
-                    self.spark._jsc.hadoopConfiguration()
-                )
-                old_path = self.spark._jvm.org.apache.hadoop.fs.Path(output_path)
-                temp_path = self.spark._jvm.org.apache.hadoop.fs.Path(f"{output_path}_temp")
-                final_file_path = self.spark._jvm.org.apache.hadoop.fs.Path(f"{output_path}_temp/part-00000")
-
-                # Удаляем старый файл
-                if fs.exists(old_path):
-                    fs.delete(old_path, True)
-
-                # Переименовываем временный файл
-                if fs.exists(final_file_path):
-                    fs.rename(final_file_path, old_path)
-
-                # Удаляем временную директорию
-                if fs.exists(temp_path):
-                    fs.delete(temp_path, True)
-
-            except Exception as e:
-                logger.warning(f"Не удалось переименовать файл: {e}")
-                # Если не удалось переименовать, просто используем прямой подход
-                content_str = "\n".join(all_content)
-                self.spark.sparkContext.parallelize([content_str]).coalesce(1).saveAsTextFile(output_path)
+                # Создаем новый файл
+                self.sc.parallelize([content]).repartition(1).saveAsTextFile(output_path)
 
             logger.info(f"Записано в файл: {content}")
 
         except Exception as e:
             logger.error(f"Ошибка при записи в файл: {e}")
-            # Запасной вариант: запись в локальный файл
+            # Альтернативный способ
             try:
-                with open("/tmp/spark_experiments_local.txt", "a") as f:
+                # Записываем в локальный файл для отладки
+                with open("/tmp/sparkExperiments.txt", "a") as f:
                     f.write(content + "\n")
                 logger.info(f"Записано в локальный файл: {content}")
-            except:
-                pass
+            except Exception as e2:
+                logger.error(f"Не удалось записать даже в локальный файл: {e2}")
 
     def read_ml_datasets(self, base_path: str = "/ml-latest-small"):
         """
         Чтение датасетов ratings и tags
-
-        Args:
-            base_path: Базовый путь к данным на HDFS
-
-        Returns:
-            Кортеж с датафреймами (ratings_df, tags_df)
         """
         ratings_path = f"{self.hdfs_path}{base_path}/ratings.csv"
         tags_path = f"{self.hdfs_path}{base_path}/tags.csv"
@@ -152,178 +119,147 @@ class SparkExperiment:
             .option("inferSchema", "true") \
             .csv(tags_path)
 
+        # Кэшируем для повторного использования
+        ratings_df.cache()
+        tags_df.cache()
+
         return ratings_df, tags_df
 
     def task_1_count_lines(self, ratings_df: DataFrame, tags_df: DataFrame):
         """Задание 1: Подсчет строк и запись информации о стадиях и тасках"""
         logger.info("Выполнение задания 1...")
 
-        # Подсчет строк с действием для запуска вычислений
-        try:
-            ratings_count = ratings_df.count()
-            tags_count = tags_df.count()
+        # Получаем информацию о партициях ДО выполнения действий
+        ratings_partitions = ratings_df.rdd.getNumPartitions()
+        tags_partitions = tags_df.rdd.getNumPartitions()
 
-            logger.info(f"Количество строк в ratings: {ratings_count}")
-            logger.info(f"Количество строк в tags: {tags_count}")
+        # Подсчет строк
+        ratings_count = ratings_df.count()
+        tags_count = tags_df.count()
 
-            # Простой расчет стадий и тасков
-            # Каждый count() вызывает действие, которое создает стадию
-            # Количество тасков зависит от партиций
+        logger.info(f"Количество строк в ratings: {ratings_count}")
+        logger.info(f"Количество строк в tags: {tags_count}")
 
-            # Получаем количество партиций
-            ratings_partitions = ratings_df.rdd.getNumPartitions()
-            tags_partitions = tags_df.rdd.getNumPartitions()
+        # Каждый count() создает один stage, но на практике Spark может объединять
+        # Простой подсчет: 2 операции count = 2 стадии
+        stages = 2
 
-            # Минимальное количество стадий для двух count() операций
-            stages = 2  # по одной стадии на каждую count() операцию
+        # Количество тасков = сумма партиций для каждой операции
+        tasks = ratings_partitions + tags_partitions
 
-            # Количество тасков: сумма партиций для каждой операции
-            tasks = ratings_partitions + tags_partitions
+        logger.info(f"Стадии: {stages}")
+        logger.info(f"Таски: {tasks}")
 
-            logger.info(f"Количество стадий: {stages}")
-            logger.info(f"Количество тасков: {tasks}")
-
-            # Запись в файл
-            self.write_to_experiment_file(f"stages:{stages} tasks:{tasks}")
-
-        except Exception as e:
-            logger.error(f"Ошибка в задании 1: {e}")
-            # Записываем значения по умолчанию
-            self.write_to_experiment_file("stages:2 tasks:4")
+        # Запись в файл
+        self.write_to_experiment_file(f"stages:{stages} tasks:{tasks}")
 
     def task_2_unique_counts(self, ratings_df: DataFrame):
         """Задание 2: Подсчет уникальных фильмов и пользователей"""
         logger.info("Выполнение задания 2...")
 
-        try:
-            unique_films = ratings_df.select("movieId").distinct().count()
-            unique_users = ratings_df.select("userId").distinct().count()
+        unique_films = ratings_df.select("movieId").distinct().count()
+        unique_users = ratings_df.select("userId").distinct().count()
 
-            logger.info(f"Уникальных фильмов: {unique_films}")
-            logger.info(f"Уникальных пользователей: {unique_users}")
+        logger.info(f"Уникальных фильмов: {unique_films}")
+        logger.info(f"Уникальных пользователей: {unique_users}")
 
-            self.write_to_experiment_file(f"filmsUnique:{unique_films} usersUnique:{unique_users}")
-
-        except Exception as e:
-            logger.error(f"Ошибка в задании 2: {e}")
+        self.write_to_experiment_file(f"filmsUnique:{unique_films} usersUnique:{unique_users}")
 
     def task_3_good_ratings(self, ratings_df: DataFrame):
         """Задание 3: Подсчет оценок >= 4.0"""
         logger.info("Выполнение задания 3...")
 
-        try:
-            good_ratings = ratings_df.filter(col("rating") >= 4.0).count()
+        good_ratings = ratings_df.filter(col("rating") >= 4.0).count()
 
-            logger.info(f"Оценок >= 4.0: {good_ratings}")
-            self.write_to_experiment_file(f"goodRating:{good_ratings}")
-
-        except Exception as e:
-            logger.error(f"Ошибка в задании 3: {e}")
+        logger.info(f"Оценок >= 4.0: {good_ratings}")
+        self.write_to_experiment_file(f"goodRating:{good_ratings}")
 
     def task_4_time_difference(self, ratings_df: DataFrame, tags_df: DataFrame):
         """Задание 4: Разница во времени между тегированием и оценкой"""
         logger.info("Выполнение задания 4...")
 
-        try:
-            # Приведение временных меток к единому формату
-            ratings_with_ts = ratings_df.withColumn(
-                "rating_timestamp",
-                F.from_unixtime(col("timestamp")).cast("timestamp")
-            ).select("userId", "movieId", "rating_timestamp")
+        # Создаем временные метки
+        ratings_with_time = ratings_df.withColumn(
+            "rating_time", from_unixtime(col("timestamp")).cast("timestamp")
+        )
 
-            tags_with_ts = tags_df.withColumn(
-                "tag_timestamp",
-                F.from_unixtime(col("timestamp")).cast("timestamp")
-            ).select("userId", "movieId", "tag_timestamp")
+        tags_with_time = tags_df.withColumn(
+            "tag_time", from_unixtime(col("timestamp")).cast("timestamp")
+        )
 
-            # Объединение данных для пар, где есть и оценка, и тег
-            joined_df = ratings_with_ts.join(
-                tags_with_ts,
-                ["userId", "movieId"],
-                "inner"
-            ).dropna()
+        # Объединяем по userId и movieId
+        joined = ratings_with_time.alias("r").join(
+            tags_with_time.alias("t"),
+            (col("r.userId") == col("t.userId")) &
+            (col("r.movieId") == col("t.movieId"))
+        ).select(
+            col("r.userId"),
+            col("r.movieId"),
+            col("r.rating_time"),
+            col("t.tag_time"),
+            (unix_timestamp(col("t.tag_time")) - unix_timestamp(col("r.rating_time"))).alias("time_diff")
+        )
 
-            # Вычисление разницы во времени в секундах
-            if joined_df.count() > 0:
-                time_diff_df = joined_df.withColumn(
-                    "time_diff_seconds",
-                    F.abs(F.unix_timestamp("tag_timestamp") - F.unix_timestamp("rating_timestamp"))
-                )
+        # Вычисляем среднюю абсолютную разницу
+        avg_diff = joined.agg(
+            F.avg(spark_abs("time_diff"))
+        ).collect()[0][0]
 
-                # Вычисление средней разницы
-                avg_time_diff = time_diff_df.agg(
-                    avg("time_diff_seconds").alias("avg_diff")
-                ).collect()[0]["avg_diff"]
+        if avg_diff is None:
+            avg_diff = 0.0
 
-                if avg_time_diff is None:
-                    avg_time_diff = 0.0
-            else:
-                avg_time_diff = 0.0
-
-            logger.info(f"Средняя разница во времени: {avg_time_diff:.2f} секунд")
-            self.write_to_experiment_file(f"timeDifference:{avg_time_diff:.2f}")
-
-        except Exception as e:
-            logger.error(f"Ошибка в задании 4: {e}")
-            self.write_to_experiment_file("timeDifference:0.0")
+        logger.info(f"Средняя разница во времени: {avg_diff:.2f} секунд")
+        self.write_to_experiment_file(f"timeDifference:{avg_diff:.2f}")
 
     def task_5_average_rating(self, ratings_df: DataFrame):
         """Задание 5: Средняя оценка от каждого пользователя"""
         logger.info("Выполнение задания 5...")
 
-        try:
-            # Средняя оценка для каждого пользователя
-            user_avg_ratings = ratings_df.groupBy("userId") \
-                .agg(avg("rating").alias("user_avg_rating"))
+        # Средняя оценка для каждого пользователя
+        user_avg = ratings_df.groupBy("userId") \
+            .agg(F.avg("rating").alias("avg_rating"))
 
-            # Среднее от всех усредненных оценок
-            overall_avg = user_avg_ratings.agg(
-                avg("user_avg_rating").alias("overall_avg")
-            ).collect()[0]["overall_avg"]
+        # Среднее от всех средних оценок пользователей
+        overall_avg = user_avg.agg(F.avg("avg_rating")).collect()[0][0]
 
-            if overall_avg is None:
-                overall_avg = 0.0
+        if overall_avg is None:
+            overall_avg = 0.0
 
-            logger.info(f"Среднее от усредненных оценок: {overall_avg:.4f}")
-            self.write_to_experiment_file(f"avgRating:{overall_avg:.4f}")
-
-        except Exception as e:
-            logger.error(f"Ошибка в задании 5: {e}")
-            self.write_to_experiment_file("avgRating:0.0")
+        logger.info(f"Среднее от средних оценок пользователей: {overall_avg:.4f}")
+        self.write_to_experiment_file(f"avgRating:{overall_avg:.4f}")
 
     def task_6_ml_prediction(self, ratings_df: DataFrame, tags_df: DataFrame):
         """Задание 6: ML модель для предсказания оценок по тегам"""
         logger.info("Выполнение задания 6...")
 
         try:
-            # Подготовка данных для обучения
-            # Используем только те пары, где есть и оценка, и тег
-            joined_data = ratings_df.alias("r").join(
-                tags_df.alias("t"),
-                (F.col("r.userId") == F.col("t.userId")) &
-                (F.col("r.movieId") == F.col("t.movieId")),
+            # Подготовка данных: объединяем оценки и теги
+            data = ratings_df.join(
+                tags_df,
+                ["userId", "movieId"],
                 "inner"
-            ).select("r.rating", "t.tag").dropna()
+            ).select("rating", "tag").dropna().filter(col("tag") != "")
 
-            # Собираем данные локально для обучения sklearn
-            collected_data = joined_data.collect()
+            # Собираем данные для обучения в драйвере
+            collected = data.collect()
 
-            if len(collected_data) < 100:
-                logger.warning(f"Недостаточно данных для обучения: {len(collected_data)} строк")
+            if len(collected) < 10:
+                logger.warning("Недостаточно данных для обучения модели")
                 self.write_to_experiment_file("rmse:0.0")
                 return
 
-            # Подготовка данных для sklearn
+            # Подготавливаем данные для sklearn
             tags_list = []
             ratings_list = []
 
-            for row in collected_data:
-                if row.tag is not None and str(row.tag).strip():
-                    tags_list.append(str(row.tag))
+            for row in collected:
+                tag = str(row.tag).strip()
+                if tag:
+                    tags_list.append(tag)
                     ratings_list.append(float(row.rating))
 
-            if len(tags_list) < 50:
-                logger.warning(f"Недостаточно тегов для обучения: {len(tags_list)}")
+            if len(tags_list) < 10:
+                logger.warning("Недостаточно тегов для обучения")
                 self.write_to_experiment_file("rmse:0.0")
                 return
 
@@ -332,65 +268,59 @@ class SparkExperiment:
                 tags_list, ratings_list, test_size=0.2, random_state=42
             )
 
-            # Обучение TF-IDF и модели
+            # Обучение TF-IDF
             vectorizer = TfidfVectorizer(max_features=100, stop_words='english')
-            X_train_tfidf = vectorizer.fit_transform(X_train)
-            X_test_tfidf = vectorizer.transform(X_test)
+            X_train_vec = vectorizer.fit_transform(X_train)
+            X_test_vec = vectorizer.transform(X_test)
 
-            model = SGDRegressor(max_iter=100, tol=1e-3, random_state=42)
-            model.fit(X_train_tfidf, y_train)
+            # Обучение модели
+            model = SGDRegressor(max_iter=1000, tol=1e-3, random_state=42)
+            model.fit(X_train_vec, y_train)
 
-            # Предсказания
-            y_pred = model.predict(X_test_tfidf)
-
-            # Вычисление RMSE
-            mse = mean_squared_error(y_test, y_pred)
-            rmse = np.sqrt(mse)
+            # Предсказания и вычисление RMSE
+            y_pred = model.predict(X_test_vec)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
 
             logger.info(f"RMSE модели: {rmse:.4f}")
 
             # Создание UDF для предсказания
-            def predict_rating_udf(tag):
-                if tag is None or not str(tag).strip():
-                    return 3.0
+            def predict_rating(tag_text):
+                if not tag_text or str(tag_text).strip() == "":
+                    return 2.5
                 try:
-                    tag_str = str(tag)
-                    if len(tag_str.strip()) == 0:
-                        return 3.0
-                    tag_vector = vectorizer.transform([tag_str])
-                    prediction = model.predict(tag_vector)[0]
-                    # Ограничение предсказания диапазоном оценок
-                    return float(max(0.5, min(5.0, prediction)))
-                except Exception as e:
-                    return 3.0
+                    vector = vectorizer.transform([str(tag_text)])
+                    pred = model.predict(vector)[0]
+                    # Ограничиваем предсказание диапазоном 0.5-5.0
+                    return float(np.clip(pred, 0.5, 5.0))
+                except:
+                    return 2.5
 
-            # Регистрация UDF в Spark
-            predict_udf = udf(predict_rating_udf, FloatType())
+            # Регистрируем UDF
+            predict_udf = udf(predict_rating, FloatType())
 
-            # Применение UDF к данным
-            tags_with_predictions = tags_df.limit(100).withColumn(
+            # Применяем UDF к датафрейму
+            test_df = tags_df.limit(50).withColumn(
                 "predicted_rating",
                 predict_udf(col("tag"))
             )
 
-            # Демонстрация работы UDF
-            logger.info("Пример предсказаний UDF (первые 10 записей):")
-            tags_with_predictions.select("tag", "predicted_rating").show(10, truncate=False)
+            # Показываем результат работы UDF
+            logger.info("Демонстрация работы UDF:")
+            test_df.select("tag", "predicted_rating").show(10, truncate=False)
 
-            # Запись RMSE в файл
+            # Записываем RMSE
             self.write_to_experiment_file(f"rmse:{rmse:.4f}")
 
         except Exception as e:
-            logger.error(f"Ошибка в ML задании: {e}")
-            self.write_to_experiment_file(f"rmse:0.0")
+            logger.error(f"Ошибка в ML задании: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.write_to_experiment_file("rmse:0.0")
 
     def run_all_tasks(self):
         """Выполнение всех заданий"""
         try:
             logger.info("Начало выполнения всех заданий...")
-
-            # Очищаем файл перед началом
-            self.write_to_experiment_file("", mode="overwrite")
 
             # Чтение данных
             ratings_df, tags_df = self.read_ml_datasets()
@@ -413,28 +343,12 @@ class SparkExperiment:
             # Задание 6
             self.task_6_ml_prediction(ratings_df, tags_df)
 
-            # Выводим содержимое файла для проверки
-            try:
-                logger.info("Содержимое файла экспериментов:")
-                file_content = self.spark.sparkContext.textFile(
-                    f"{self.hdfs_path}{self.experiment_file}"
-                ).collect()
-                for line in file_content:
-                    logger.info(line)
-            except:
-                # Пробуем прочитать локальный файл
-                try:
-                    with open("/tmp/spark_experiments_local.txt", "r") as f:
-                        content = f.read()
-                        logger.info("Содержимое локального файла:")
-                        logger.info(content)
-                except:
-                    pass
-
             logger.info("Все задания успешно выполнены!")
 
         except Exception as e:
             logger.error(f"Ошибка при выполнении заданий: {e}")
+            import traceback
+            traceback.print_exc()
             raise
 
     def stop(self):
@@ -456,6 +370,8 @@ def main():
 
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 
