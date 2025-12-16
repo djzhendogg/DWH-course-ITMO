@@ -41,11 +41,6 @@ class KafkaToPostgresConsumer:
                 upsert_query = """
                     INSERT INTO dm_posts (post_id, author_id, created_at)
                     VALUES (%s, %s, %s)
-                    ON CONFLICT (post_id) 
-                    DO UPDATE SET 
-                        author_id = EXCLUDED.author_id,
-                        last_updated = EXCLUDED.created_at
-                    WHERE dm_posts.author_id != EXCLUDED.author_id;
                 """
 
                 cursor.execute(upsert_query,
@@ -140,12 +135,13 @@ class KafkaToPostgresConsumer:
 
                 if parsed_event['event_type'] == 'new_post':
                     self.process_new_post(parsed_event)
+                    self.consumer.commit(asynchronous=False)
                     counter += 1
 
                     # 2. Сохраняем like/repost в raw_events
                 if parsed_event['event_type'] in ['like', 'repost']:
                     events_batch.append(parsed_event)
-                    self.save_to_raw_events([parsed_event])
+                    # self.save_to_raw_events([parsed_event])
                     counter += 1
 
                 # Вставляем батчем для эффективности
