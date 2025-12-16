@@ -1,19 +1,29 @@
 import psycopg2
+import os
+
 from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
 import logging
+from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+load_dotenv("env.conf")
 
 class PostgresAggregator:
-    def __init__(self, db_params):
+    def __init__(self):
         """
         Инициализация подключения к базе данных
         :param db_params: параметры подключения к БД
         """
-        self.connection = psycopg2.connect(**db_params)
+        self.connection = psycopg2.connect(
+            host=os.getenv('POSTGRES_HOST'),
+            port=os.getenv('POSTGRES_PORT'),
+            database=os.getenv('POSTGRES_DB'),
+            user=os.getenv('POSTGRES_USER'),
+            password=os.getenv('POSTGRES_PASSWORD')
+        )
         self.cursor = self.connection.cursor(cursor_factory=RealDictCursor)
 
     def get_hourly_ranges(self):
@@ -377,24 +387,15 @@ def main():
     """
     Пример использования агрегатора
     """
-    # Параметры подключения к БД
-    db_params = {
-        'host': 'localhost',
-        'port': 5432,
-        'database': 'your_database',
-        'user': 'your_username',
-        'password': 'your_password'
-    }
-
     # Создаем экземпляр агрегатора
-    aggregator = PostgresAggregator(db_params)
+    aggregator = PostgresAggregator()
 
     try:
         # Вариант 1: Полная пересборка всех агрегаций
-        # aggregator.refresh_aggregations()
+        aggregator.refresh_aggregations()
 
         # Вариант 2: Инкрементальное обновление (для последнего часа)
-        aggregator.incremental_update()
+        # aggregator.incremental_update()
 
         # Получение статистики за конкретный час
         # specific_hour = datetime(2024, 1, 1, 10, 0, 0)  # 1 января 2024, 10:00
