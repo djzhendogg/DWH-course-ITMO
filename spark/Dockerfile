@@ -49,6 +49,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Настройка Hadoop для работы с HDFS
 COPY core-site.xml ${HADOOP_CONF_DIR}/
 COPY hdfs-site.xml ${HADOOP_CONF_DIR}/
+COPY yarn-site.xml ${HADOOP_CONF_DIR}/
 
 # Копирование файлов приложения
 COPY data .
