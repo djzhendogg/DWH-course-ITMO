@@ -62,4 +62,8 @@ echo "==========================="
 echo "Running Spark application..."
 python /app/spark_new_app.py
 
+echo "Файл найден в HDFS:"
+echo "----------------------------------------------------"
+hdfs dfs -cat /sparkExperiments.txt
+echo "----------------------------------------------------"
 echo "Spark application completed successfully!"
