@@ -63,15 +63,18 @@ def main():
     # ============================
     tracker = sc.statusTracker()
 
-    stage_ids = tracker.getStageIdsForAllJobs()
-
-    num_stages = len(stage_ids)
+    num_stages = 0
     num_tasks = 0
+    for job_id in tracker.getActiveJobIds():
+        job_info = tracker.getJobInfo(job_id)
 
-    for stage_id in stage_ids:
-        info = tracker.getStageInfo(stage_id)
-        if info is not None:
-            num_tasks += info.numTasks()
+        if job_info:
+            for stage_id in job_info.stageIds:
+                stage_info = tracker.getStageInfo(stage_id)
+                if stage_info:
+                    num_stages += 1
+                    num_tasks += stage_info.numTasks
+
     logger.info(f"stages:{num_stages} tasks:{num_tasks}")
     hdfs_append(f"stages:{num_stages} tasks:{num_tasks}")
 
