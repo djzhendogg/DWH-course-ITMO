@@ -51,7 +51,7 @@ COPY hdfs-site.xml ${HADOOP_CONF_DIR}/
 
 # Копирование файлов приложения
 COPY data .
-COPY spark_app.py .
+COPY spark_new_app.py .
 COPY entrypoint.sh .
 
 # Создание пользователя и настройка разрешений
