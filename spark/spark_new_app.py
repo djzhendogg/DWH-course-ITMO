@@ -135,7 +135,7 @@ def six_task(ratings, tags):
 
     # округлим для аккуратного вывода
     # avg_time_diff = 48201779.226911314
-    avg_time_diff = 48243234.8324159
+    # avg_time_diff = 48243234.8324159
     logger.info(f"timeDifference:{avg_time_diff}")
     hdfs_append(f"timeDifference:{avg_time_diff}")
 
