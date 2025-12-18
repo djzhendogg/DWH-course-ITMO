@@ -100,14 +100,16 @@ def six_task(ratings, tags):
             on=["userId", "movieId"],
             how="inner"
         )
+        # Добавляем колонку с абсолютной разницей в секундах
         .withColumn(
             "time_diff",
-            spark_abs(
-                col("t.timestamp") - col("r.timestamp")
-            )
+            spark_abs(col("t.timestamp") - col("r.timestamp"))
         )
+        # Убираем возможные дубликаты, если есть несколько тегов для одной оценки
+        .dropDuplicates(["userId", "movieId", "r.timestamp", "t.timestamp"])
     )
 
+    # Считаем среднюю разницу
     avg_time_diff = (
         joined
         .select(avg("time_diff").alias("avg_diff"))
@@ -115,7 +117,6 @@ def six_task(ratings, tags):
     )
 
     # округлим для аккуратного вывода
-    avg_time_diff = round(avg_time_diff, 5)
     logger.info(f"timeDifference:{avg_time_diff}")
     hdfs_append(f"timeDifference:{avg_time_diff}")
 
