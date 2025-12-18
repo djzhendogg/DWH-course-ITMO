@@ -1,4 +1,4 @@
-FROM python:3.9-bookworm
+FROM python:3.9
 
 # Установка системных зависимостей
 RUN apt-get update && apt-get install -y \
@@ -56,6 +56,5 @@ COPY entrypoint.sh .
 
 # Создание пользователя и настройка разрешений
 RUN chmod +x entrypoint.sh
-RUN ln -s /usr/bin/python3 /usr/bin/python
 
 ENTRYPOINT ["./entrypoint.sh"]
