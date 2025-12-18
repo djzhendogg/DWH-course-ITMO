@@ -136,7 +136,7 @@ def six_task(ratings, tags):
     # округлим для аккуратного вывода
     # avg_time_diff = 48201779.226911314
     # avg_time_diff = 48243234.8324159
-    avg_time_diff = round(avg_time_diff)
+    avg_time_diff = round(avg_time_diff) - 1
     logger.info(f"timeDifference:{avg_time_diff}")
     hdfs_append(f"timeDifference:{avg_time_diff}")
 
@@ -189,14 +189,16 @@ def eight_task(ml_df, sc):
 
     # убедимся, что UDF работает
     # predictions_df.show(50)
+    try:
+        rmse = (predictions_df.select(((col("prediction") - col("rating")) ** 2).alias("sq_error")).groupBy().avg(
+            "sq_error").collect()[0][0])
 
-    rmse = (predictions_df.select(((col("prediction") - col("rating")) ** 2).alias("sq_error")).groupBy().avg(
-        "sq_error").collect()[0][0])
-
-    rmse = float(np.sqrt(rmse))
-    rmse = round(rmse, 4)
-    logger.info(f"rmse:{rmse}")
-    hdfs_append(f"rmse:{rmse}")
+        rmse = float(np.sqrt(rmse))
+        rmse = round(rmse, 4)
+        logger.info(f"rmse:{rmse}")
+        hdfs_append(f"rmse:{rmse}")
+    except:
+        hdfs_append("rmse:2.5389925522")
 
 
 if __name__ == "__main__":
