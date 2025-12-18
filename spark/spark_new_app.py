@@ -9,6 +9,7 @@ from pyspark.sql.types import DoubleType
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import SGDRegressor
 from sklearn.metrics import mean_squared_error
+from pyspark.sql.functions import min as spark_min
 
 HDFS_RESULT_FILE = "/sparkExperiments.txt"
 DATA_PATH = "hdfs://192.168.34.2:8020/ml-latest-small"
@@ -101,26 +102,20 @@ def fiths_task(ratings):
     hdfs_append(f"goodRating:{good_ratings}")
 
 def six_task(ratings, tags):
-    joined = (
+    pair_diffs = (
         ratings.alias("r")
-        .join(
-            tags.alias("t"),
-            on=["userId", "movieId"],
-            how="inner"
-        )
-        # Добавляем колонку с абсолютной разницей в секундах
+        .join(tags.alias("t"), on=["userId", "movieId"], how="inner")
         .withColumn(
             "time_diff",
             spark_abs(col("t.timestamp") - col("r.timestamp"))
         )
-        # Убираем возможные дубликаты, если есть несколько тегов для одной оценки
-        .dropDuplicates(["userId", "movieId", "r.timestamp", "t.timestamp"])
+        .groupBy("userId", "movieId")
+        .agg(spark_min("time_diff").alias("min_time_diff"))
     )
 
-    # Считаем среднюю разницу
     avg_time_diff = (
-        joined
-        .select(avg("time_diff").alias("avg_diff"))
+        pair_diffs
+        .select(avg("min_time_diff").alias("avg_diff"))
         .collect()[0]["avg_diff"]
     )
 
