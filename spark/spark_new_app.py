@@ -1,9 +1,14 @@
 import logging
 import subprocess
 
+import numpy as np
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
 from pyspark.sql.functions import abs as spark_abs, avg
+from pyspark.sql.functions import udf, col
+from pyspark.sql.types import DoubleType
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import SGDRegressor
+from sklearn.metrics import mean_squared_error
 
 HDFS_RESULT_FILE = "/sparkExperiments.txt"
 DATA_PATH = "hdfs://192.168.34.2:8020/ml-latest-small"
@@ -73,6 +78,9 @@ def main():
     fiths_task(ratings)
     six_task(ratings, tags)
     seventh_task(ratings)
+
+    ml_df = (ratings.join(tags, on=["userId", "movieId"], how="inner").select("rating", "tag").dropna())
+    eight_task(ml_df, sc)
     # ============================
     # Finish
     # ============================
@@ -137,6 +145,46 @@ def seventh_task(ratings):
     overall_avg_rating = round(overall_avg_rating, 5)
     logger.info(f"avgRating:{overall_avg_rating}")
     hdfs_append(f"avgRating:{overall_avg_rating}")
+
+
+def eight_task(ml_df, sc):
+    pdf = ml_df.toPandas()
+
+    X_text = pdf["tag"].astype(str).values
+    y = pdf["rating"].values
+
+    vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
+
+    X = vectorizer.fit_transform(X_text)
+
+    model = SGDRegressor(max_iter=1000, tol=1e-3, random_state=42)
+
+    model.fit(X, y)
+    bc_model = sc.broadcast(model)
+    bc_vectorizer = sc.broadcast(vectorizer)
+
+    def predict_rating(tag: str) -> float:
+        if tag is None:
+            return None
+        vec = bc_vectorizer.value.transform([tag])
+        pred = bc_model.value.predict(vec)[0]
+        return float(pred)
+
+    predict_udf = udf(predict_rating, DoubleType())
+
+    predictions_df = ml_df.withColumn("prediction", predict_udf(col("tag")))
+
+    # убедимся, что UDF работает
+    predictions_df.show(50)
+
+    rmse = (predictions_df.select(((col("prediction") - col("rating")) ** 2).alias("sq_error")).groupBy().avg(
+        "sq_error").collect()[0][0])
+
+    rmse = float(np.sqrt(rmse))
+    rmse = round(rmse, 4)
+
+    hdfs_append(f"rmse:{rmse}")
+
 
 if __name__ == "__main__":
     main()
