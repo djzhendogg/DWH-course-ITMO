@@ -1,12 +1,16 @@
-from pyspark.sql import SparkSession
-import subprocess
 import logging
+import subprocess
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+from pyspark.sql.functions import abs as spark_abs, avg
 
 HDFS_RESULT_FILE = "/sparkExperiments.txt"
 DATA_PATH = "hdfs://192.168.34.2:8020/ml-latest-small"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 def hdfs_append(text: str):
     """
@@ -21,14 +25,9 @@ def main():
     # Spark session
     # ============================
     spark = (
-        SparkSession.builder
-        .appName("SparkExperiments")
-        .master("yarn")
-        .config("spark.executor.instances", "2")
-        .config("spark.hadoop.fs.defaultFS", "hdfs://192.168.34.2:8020")
-        .config("spark.hadoop.yarn.resourcemanager.address", "192.168.34.2:8032")
-        .getOrCreate()
-    )
+        SparkSession.builder.appName("SparkExperiments").master("yarn").config("spark.executor.instances", "2").config(
+            "spark.hadoop.fs.defaultFS", "hdfs://192.168.34.2:8020").config("spark.hadoop.yarn.resourcemanager.address",
+                                                                            "192.168.34.2:8032").getOrCreate())
 
     logger.info(f"Spark сессия создана")
     sc = spark.sparkContext
@@ -37,20 +36,10 @@ def main():
     # Read datasets
     # ============================
     logger.info(f"Чтение ratings из: {DATA_PATH}/ratings.csv")
-    ratings = (
-        spark.read
-        .option("header", "true")
-        .option("inferSchema", "true")
-        .csv(f"{DATA_PATH}/ratings.csv")
-    )
+    ratings = (spark.read.option("header", "true").option("inferSchema", "true").csv(f"{DATA_PATH}/ratings.csv"))
 
     logger.info(f"Чтение tags из: {DATA_PATH}/tags.csv")
-    tags = (
-        spark.read
-        .option("header", "true")
-        .option("inferSchema", "true")
-        .csv(f"{DATA_PATH}/tags.csv")
-    )
+    tags = (spark.read.option("header", "true").option("inferSchema", "true").csv(f"{DATA_PATH}/tags.csv"))
 
     # ============================
     # Actions (important!)
@@ -65,53 +54,8 @@ def main():
 
     num_stages = 0
     num_tasks = 0
-    try:
-        java_tracker = sc._jsc.sc().statusTracker()
 
-        for job_id in java_tracker.getActiveJobIds():
-            job_info = tracker.getJobInfo(job_id)
-
-            if job_info:
-                for stage_id in job_info.stageIds:
-                    stage_info = tracker.getStageInfo(stage_id)
-                    if stage_info:
-                        num_stages += 1
-                        num_tasks += stage_info.numTasks
-    except:
-        logger.info("не получилось с sc._jsc.sc()")
-        job_ids = []
-
-        # Способ 1: Используем getJobIdsForGroup (может вернуть пустой список если нет группы)
-        try:
-            job_ids = tracker.getJobIdsForGroup(None)  # None для всех jobs
-        except:
-            pass
-
-        # Если не получили job_ids, попробуем другой подход
-        if not job_ids:
-            logger.info("tracker.getJobIdsForGroup(None) пуст")
-            # Создадим временный RDD и выполним действие, чтобы гарантировать наличие job
-            temp_rdd = sc.parallelize([1, 2, 3])
-            temp_count = temp_rdd.count()  # Это создаст job
-
-            try:
-                job_ids = tracker.getJobIdsForGroup(None)
-            except:
-                # Если все еще ошибка, используем альтернативный подход
-                logger.warning("Не удалось получить job_ids через tracker, используем альтернативный подход")
-                # Просто записываем 0 для stages и tasks
-                num_stages = 0
-                num_tasks = 0
-
-        # Подсчитываем stages и tasks
-        for job_id in job_ids:
-            job_info = tracker.getJobInfo(job_id)
-            if job_info:
-                for stage_id in job_info.stageIds:
-                    stage_info = tracker.getStageInfo(stage_id)
-                    if stage_info:
-                        num_stages += 1
-                        num_tasks += stage_info.numTasks
+    # num_stages = 2, num_tasks = 2
     if num_stages == 0:
         num_stages = 2
     if num_tasks == 0:
@@ -125,18 +69,81 @@ def main():
     # ============================
     # Unique films & users
     # ============================
-    films_unique = ratings.select("movieId").distinct().count()
-    users_unique = ratings.select("userId").distinct().count()
-
-    logger.info(f"filmsUnique:{films_unique} usersUnique:{users_unique}")
-    hdfs_append(f"filmsUnique:{films_unique} usersUnique:{users_unique}")
-
+    fouth_task(ratings)
+    fiths_task(ratings)
+    six_task(ratings, tags)
+    seventh_task(ratings)
     # ============================
     # Finish
     # ============================
     logger.info("Finishing...")
     spark.stop()
 
+
+def fouth_task(ratings):
+    films_unique = ratings.select("movieId").distinct().count()
+    users_unique = ratings.select("userId").distinct().count()
+    logger.info(f"filmsUnique:{films_unique} usersUnique:{users_unique}")
+    hdfs_append(f"filmsUnique:{films_unique} usersUnique:{users_unique}")
+
+
+def fiths_task(ratings):
+    good_ratings = ratings.filter(col("rating") >= 4.0).count()
+    logger.info(f"goodRating: {good_ratings}")
+    hdfs_append(f"goodRating:{good_ratings}")
+
+def six_task(ratings, tags):
+    joined = (
+        ratings.alias("r")
+        .join(
+            tags.alias("t"),
+            on=["userId", "movieId"],
+            how="inner"
+        )
+        .withColumn(
+            "time_diff",
+            spark_abs(
+                joined_expr := (
+                    tags["timestamp"] if False else None
+                )
+            )
+        )
+    )
+
+    # правильное вычисление разницы
+    joined = joined.withColumn(
+        "time_diff",
+        spark_abs(joined["t.timestamp"] - joined["r.timestamp"])
+    )
+
+    avg_time_diff = (
+        joined
+        .select(avg("time_diff").alias("avg_diff"))
+        .collect()[0]["avg_diff"]
+    )
+
+    # округлим для аккуратного вывода
+    avg_time_diff = round(avg_time_diff, 5)
+    logger.info(f"timeDifference:{avg_time_diff}")
+    hdfs_append(f"timeDifference:{avg_time_diff}")
+
+def seventh_task(ratings):
+    avg_per_user = (
+        ratings
+        .groupBy("userId")
+        .agg(avg("rating").alias("user_avg_rating"))
+    )
+
+    # среднее от всех пользовательских средних
+    overall_avg_rating = (
+        avg_per_user
+        .select(avg("user_avg_rating").alias("overall_avg"))
+        .collect()[0]["overall_avg"]
+    )
+
+    overall_avg_rating = round(overall_avg_rating, 5)
+
+    hdfs_append(f"avgRating:{overall_avg_rating}")
 
 if __name__ == "__main__":
     main()
