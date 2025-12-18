@@ -103,17 +103,9 @@ def six_task(ratings, tags):
         .withColumn(
             "time_diff",
             spark_abs(
-                joined_expr := (
-                    tags["timestamp"] if False else None
-                )
+                col("t.timestamp") - col("r.timestamp")
             )
         )
-    )
-
-    # правильное вычисление разницы
-    joined = joined.withColumn(
-        "time_diff",
-        spark_abs(joined["t.timestamp"] - joined["r.timestamp"])
     )
 
     avg_time_diff = (
@@ -142,7 +134,7 @@ def seventh_task(ratings):
     )
 
     overall_avg_rating = round(overall_avg_rating, 5)
-
+    logger.info(f"avgRating:{overall_avg_rating}")
     hdfs_append(f"avgRating:{overall_avg_rating}")
 
 if __name__ == "__main__":
