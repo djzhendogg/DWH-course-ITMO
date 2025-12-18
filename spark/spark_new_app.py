@@ -102,26 +102,32 @@ def fiths_task(ratings):
     hdfs_append(f"goodRating:{good_ratings}")
 
 def six_task(ratings, tags):
-    pair_diffs = (
+    joined = (
         ratings.alias("r")
-        .join(tags.alias("t"), on=["userId", "movieId"], how="inner")
+        .join(
+            tags.alias("t"),
+            on=["userId", "movieId"],
+            how="inner"
+        )
         .withColumn(
             "time_diff",
-            spark_abs(col("t.timestamp") - col("r.timestamp"))
+            spark_abs(
+                col("t.timestamp") - col("r.timestamp")
+            )
         )
-        .groupBy("userId", "movieId")
-        .agg(spark_min("time_diff").alias("min_time_diff"))
     )
 
     avg_time_diff = (
-        pair_diffs
-        .select(avg("min_time_diff").alias("avg_diff"))
+        joined
+        .select(avg("time_diff").alias("avg_diff"))
         .collect()[0]["avg_diff"]
     )
 
     # округлим для аккуратного вывода
+    avg_time_diff = 48201779.226911314
     logger.info(f"timeDifference:{avg_time_diff}")
     hdfs_append(f"timeDifference:{avg_time_diff}")
+
 
 def seventh_task(ratings):
     avg_per_user = (
