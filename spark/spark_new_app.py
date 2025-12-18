@@ -12,8 +12,8 @@ from sklearn.metrics import mean_squared_error
 from pyspark.sql.functions import min as spark_min
 import os
 
-os.environ["PYSPARK_PYTHON"] = "/usr/bin/python3"
-os.environ["PYSPARK_DRIVER_PYTHON"] = "/usr/bin/python3"
+os.environ["PYSPARK_PYTHON"] = "/usr/local/bin/python3"
+os.environ["PYSPARK_DRIVER_PYTHON"] = "/usr/local/bin/python3"
 
 HDFS_RESULT_FILE = "/sparkExperiments.txt"
 DATA_PATH = "hdfs://192.168.34.2:8020/ml-latest-small"
@@ -41,8 +41,8 @@ def main():
         .config("spark.executor.instances", "2")
         .config("spark.hadoop.fs.defaultFS", "hdfs://192.168.34.2:8020")
         .config("spark.hadoop.yarn.resourcemanager.address","192.168.34.2:8032")
-        .config("spark.pyspark.python", "/usr/bin/python3")
-        .config("spark.pyspark.driver.python", "/usr/bin/python3")
+        .config("spark.pyspark.python", "/usr/local/bin/python3")
+        .config("spark.pyspark.driver.python", "/usr/local/bin/python3")
         .getOrCreate())
 
     logger.info(f"Spark сессия создана")
