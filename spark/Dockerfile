@@ -2,9 +2,7 @@ FROM python:3.9
 
 # Установка зависимостей
 RUN apt-get update && apt-get install -y \
-    wget \
     openjdk-11-jre-headless \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN java -version
