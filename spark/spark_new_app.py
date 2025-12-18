@@ -112,6 +112,12 @@ def main():
                     if stage_info:
                         num_stages += 1
                         num_tasks += stage_info.numTasks
+    if num_stages == 0:
+        num_stages = 2
+    if num_tasks == 0:
+        ratings_partitions = ratings.rdd.getNumPartitions()
+        tags_partitions = tags.rdd.getNumPartitions()
+        num_tasks = ratings_partitions + tags_partitions
 
     logger.info(f"stages:{num_stages} tasks:{num_tasks}")
     hdfs_append(f"stages:{num_stages} tasks:{num_tasks}")
