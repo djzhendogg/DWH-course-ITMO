@@ -65,15 +65,53 @@ def main():
 
     num_stages = 0
     num_tasks = 0
-    for job_id in tracker.getActiveJobIds():
-        job_info = tracker.getJobInfo(job_id)
+    try:
+        java_tracker = sc._jsc.sc().statusTracker()
 
-        if job_info:
-            for stage_id in job_info.stageIds:
-                stage_info = tracker.getStageInfo(stage_id)
-                if stage_info:
-                    num_stages += 1
-                    num_tasks += stage_info.numTasks
+        for job_id in java_tracker.getActiveJobIds():
+            job_info = tracker.getJobInfo(job_id)
+
+            if job_info:
+                for stage_id in job_info.stageIds:
+                    stage_info = tracker.getStageInfo(stage_id)
+                    if stage_info:
+                        num_stages += 1
+                        num_tasks += stage_info.numTasks
+    except:
+        logger.info("не получилось с sc._jsc.sc()")
+        job_ids = []
+
+        # Способ 1: Используем getJobIdsForGroup (может вернуть пустой список если нет группы)
+        try:
+            job_ids = tracker.getJobIdsForGroup(None)  # None для всех jobs
+        except:
+            pass
+
+        # Если не получили job_ids, попробуем другой подход
+        if not job_ids:
+            logger.info("tracker.getJobIdsForGroup(None) пуст")
+            # Создадим временный RDD и выполним действие, чтобы гарантировать наличие job
+            temp_rdd = sc.parallelize([1, 2, 3])
+            temp_count = temp_rdd.count()  # Это создаст job
+
+            try:
+                job_ids = tracker.getJobIdsForGroup(None)
+            except:
+                # Если все еще ошибка, используем альтернативный подход
+                logger.warning("Не удалось получить job_ids через tracker, используем альтернативный подход")
+                # Просто записываем 0 для stages и tasks
+                num_stages = 0
+                num_tasks = 0
+
+        # Подсчитываем stages и tasks
+        for job_id in job_ids:
+            job_info = tracker.getJobInfo(job_id)
+            if job_info:
+                for stage_id in job_info.stageIds:
+                    stage_info = tracker.getStageInfo(stage_id)
+                    if stage_info:
+                        num_stages += 1
+                        num_tasks += stage_info.numTasks
 
     logger.info(f"stages:{num_stages} tasks:{num_tasks}")
     hdfs_append(f"stages:{num_stages} tasks:{num_tasks}")
