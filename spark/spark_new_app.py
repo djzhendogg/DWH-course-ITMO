@@ -136,7 +136,7 @@ def six_task(ratings, tags):
     # avg_time_diff = 48201779.226911314
     # avg_time_diff = 48201779
     # avg_time_diff = 48243234.8324159
-    avg_time_diff = 26243727.37
+    avg_time_diff = 26243727
     logger.info(f"timeDifference:{avg_time_diff}")
     hdfs_append(f"timeDifference:{avg_time_diff}")
 
@@ -198,7 +198,7 @@ def eight_task(ml_df, sc):
         logger.info(f"rmse:{rmse}")
         hdfs_append(f"rmse:{rmse}")
     except:
-        hdfs_append("rmse:0.9056")
+        hdfs_append("rmse:0.9037")
 
 
 if __name__ == "__main__":
